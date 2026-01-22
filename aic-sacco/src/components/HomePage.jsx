@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
+const API_BASE_URL = "https://aic-testimony-sacco-1.onrender.com/api";
+
 export default function HomePage() {
   const navigate = useNavigate();
   const [stats, setStats] = useState({
@@ -10,7 +12,7 @@ export default function HomePage() {
   });
 
   useEffect(() => {
-    fetch("http://localhost:5000/api/public/stats")
+    fetch(`${API_BASE_URL}/public/stats`)
       .then(res => res.json())
       .then(data => setStats(data))
       .catch(err => console.error("Error fetching stats:", err));

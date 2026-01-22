@@ -3,6 +3,8 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import Reports from "./Reports";
 
+const API_BASE_URL = "https://aic-testimony-sacco-1.onrender.com";
+
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("members"); // members, reports
   const [members, setMembers] = useState([]);
@@ -41,7 +43,7 @@ const AdminDashboard = () => {
 
   const loadMembers = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/admin/members", getAuthHeaders());
+      const res = await axios.get(`${API_BASE_URL}/api/admin/members`, getAuthHeaders());
       setMembers(res.data);
     } catch (error) {
       console.error("Error loading members:", error);
@@ -51,7 +53,7 @@ const AdminDashboard = () => {
 
   const loadLoans = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/admin/loans", getAuthHeaders());
+      const res = await axios.get(`${API_BASE_URL}/api/admin/loans`, getAuthHeaders());
       setLoans(res.data);
     } catch (error) {
       console.error("Error loading loans:", error);
@@ -70,7 +72,7 @@ const AdminDashboard = () => {
       return;
     }
     try {
-      await axios.post("http://localhost:5000/api/admin/members", newMember, getAuthHeaders());
+      await axios.post(`${API_BASE_URL}/api/admin/members`, newMember, getAuthHeaders());
       setNewMember({ full_name: "", id_number: "", email: "", phone: "", password: "", role: "MEMBER" });
       loadMembers();
       alert("Member added successfully!");
@@ -82,7 +84,7 @@ const AdminDashboard = () => {
 
   const updateMember = async () => {
     try {
-      await axios.put(`http://localhost:5000/api/admin/members/${editMember.id}`, editMember, getAuthHeaders());
+      await axios.put(`${API_BASE_URL}/api/admin/members/${editMember.id}`, editMember, getAuthHeaders());
       setEditMember(null);
       loadMembers();
       alert("Member updated successfully!");
@@ -95,7 +97,7 @@ const AdminDashboard = () => {
   const deleteMember = async (id) => {
     if (!window.confirm("Are you sure you want to delete this member?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/admin/members/${id}`, getAuthHeaders());
+      await axios.delete(`${API_BASE_URL}/api/admin/members/${id}`, getAuthHeaders());
       loadMembers();
       alert("Member deleted successfully!");
     } catch (error) {
@@ -112,7 +114,7 @@ const AdminDashboard = () => {
     }
     try {
       await axios.post(
-        `http://localhost:5000/api/admin/members/${memberId}/savings`, 
+        `${API_BASE_URL}/api/admin/members/${memberId}/savings`, 
         { amount: parseFloat(amount) }, 
         getAuthHeaders()
       );
@@ -127,7 +129,7 @@ const AdminDashboard = () => {
 
   const approveLoan = async (id) => {
     try {
-      await axios.put(`http://localhost:5000/api/admin/loans/${id}/approve`, {}, getAuthHeaders());
+      await axios.put(`${API_BASE_URL}/api/admin/loans/${id}/approve`, {}, getAuthHeaders());
       loadLoans();
       loadMembers();
       alert("Loan approved successfully!");
@@ -139,7 +141,7 @@ const AdminDashboard = () => {
 
   const rejectLoan = async (id) => {
     try {
-      await axios.put(`http://localhost:5000/api/admin/loans/${id}/reject`, {}, getAuthHeaders());
+      await axios.put(`${API_BASE_URL}/api/admin/loans/${id}/reject`, {}, getAuthHeaders());
       loadLoans();
       alert("Loan rejected successfully!");
     } catch (error) {
@@ -156,7 +158,7 @@ const AdminDashboard = () => {
     }
     try {
       const res = await axios.put(
-        `http://localhost:5000/api/admin/loans/${id}/payment`, 
+        `${API_BASE_URL}/api/admin/loans/${id}/payment`, 
         { amount: parseFloat(amount) }, 
         getAuthHeaders()
       );
