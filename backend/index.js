@@ -12,9 +12,23 @@ const publicRoutes = require("./routes/public"); // ✅ ADD THIS
 
 const app = express();
 
-// CORS setup for Vite frontend
+// Determine allowed origins
+const allowedOrigins = [
+  "http://localhost:5173", // local dev
+  "https://aic-testimony-sacco-1.onrender.com" // production frontend
+];
+
+// CORS setup
 app.use(cors({
-  origin: "http://localhost:5173",
+  origin: function(origin, callback) {
+    // allow requests with no origin (e.g., Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true
 }));
 
@@ -33,4 +47,4 @@ app.get("/", (req, res) => res.send("SACCO Backend is running"));
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
