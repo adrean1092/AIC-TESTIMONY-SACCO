@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API_BASE_URL = "https://aic-testimony-sacco-1.onrender.com/api";
+const API_BASE_URL = "https://aic-testimony-sacco.onrender.com/api";
 
 export default function HomePage() {
   const navigate = useNavigate();
