@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import API from "../api"; // Use centralized API
 import Reports from "./Reports";
-
-const API_BASE_URL = "https://aic-testimony-sacco-1.onrender.com";
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("members"); // members, reports
@@ -25,15 +23,6 @@ const AdminDashboard = () => {
 
   const navigate = useNavigate();
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
-    return {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    };
-  };
-
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
@@ -43,7 +32,7 @@ const AdminDashboard = () => {
 
   const loadMembers = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/admin/members`, getAuthHeaders());
+      const res = await API.get("/admin/members");
       setMembers(res.data);
     } catch (error) {
       console.error("Error loading members:", error);
@@ -53,7 +42,7 @@ const AdminDashboard = () => {
 
   const loadLoans = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/admin/loans`, getAuthHeaders());
+      const res = await API.get("/admin/loans");
       setLoans(res.data);
     } catch (error) {
       console.error("Error loading loans:", error);
@@ -72,7 +61,7 @@ const AdminDashboard = () => {
       return;
     }
     try {
-      await axios.post(`${API_BASE_URL}/api/admin/members`, newMember, getAuthHeaders());
+      await API.post("/admin/members", newMember);
       setNewMember({ full_name: "", id_number: "", email: "", phone: "", password: "", role: "MEMBER" });
       loadMembers();
       alert("Member added successfully!");
@@ -84,7 +73,7 @@ const AdminDashboard = () => {
 
   const updateMember = async () => {
     try {
-      await axios.put(`${API_BASE_URL}/api/admin/members/${editMember.id}`, editMember, getAuthHeaders());
+      await API.put(`/admin/members/${editMember.id}`, editMember);
       setEditMember(null);
       loadMembers();
       alert("Member updated successfully!");
@@ -97,7 +86,7 @@ const AdminDashboard = () => {
   const deleteMember = async (id) => {
     if (!window.confirm("Are you sure you want to delete this member?")) return;
     try {
-      await axios.delete(`${API_BASE_URL}/api/admin/members/${id}`, getAuthHeaders());
+      await API.delete(`/admin/members/${id}`);
       loadMembers();
       alert("Member deleted successfully!");
     } catch (error) {
@@ -113,11 +102,7 @@ const AdminDashboard = () => {
       return;
     }
     try {
-      await axios.post(
-        `${API_BASE_URL}/api/admin/members/${memberId}/savings`, 
-        { amount: parseFloat(amount) }, 
-        getAuthHeaders()
-      );
+      await API.post(`/admin/members/${memberId}/savings`, { amount: parseFloat(amount) });
       setSavingsAmount({ ...savingsAmount, [memberId]: "" });
       loadMembers();
       alert("Savings updated successfully!");
@@ -129,7 +114,7 @@ const AdminDashboard = () => {
 
   const approveLoan = async (id) => {
     try {
-      await axios.put(`${API_BASE_URL}/api/admin/loans/${id}/approve`, {}, getAuthHeaders());
+      await API.put(`/admin/loans/${id}/approve`, {});
       loadLoans();
       loadMembers();
       alert("Loan approved successfully!");
@@ -141,7 +126,7 @@ const AdminDashboard = () => {
 
   const rejectLoan = async (id) => {
     try {
-      await axios.put(`${API_BASE_URL}/api/admin/loans/${id}/reject`, {}, getAuthHeaders());
+      await API.put(`/admin/loans/${id}/reject`, {});
       loadLoans();
       alert("Loan rejected successfully!");
     } catch (error) {
@@ -157,11 +142,7 @@ const AdminDashboard = () => {
       return;
     }
     try {
-      const res = await axios.put(
-        `${API_BASE_URL}/api/admin/loans/${id}/payment`, 
-        { amount: parseFloat(amount) }, 
-        getAuthHeaders()
-      );
+      const res = await API.put(`/admin/loans/${id}/payment`, { amount: parseFloat(amount) });
       setPaymentAmount({ ...paymentAmount, [id]: "" });
       setPaymentResult(res.data);
       setShowPaymentModal(true);
@@ -188,112 +169,74 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* Tabs Navigation */}
-      <div className="bg-white shadow rounded-lg mb-6">
-        <div className="flex border-b">
-          <button
-            onClick={() => setActiveTab("members")}
-            className={`px-6 py-3 font-semibold transition ${
-              activeTab === "members"
-                ? "border-b-2 border-red-600 text-red-600"
-                : "text-gray-600 hover:text-gray-800"
-            }`}
-          >
-            👥 Members & Loans
-          </button>
-          <button
-            onClick={() => setActiveTab("reports")}
-            className={`px-6 py-3 font-semibold transition ${
-              activeTab === "reports"
-                ? "border-b-2 border-red-600 text-red-600"
-                : "text-gray-600 hover:text-gray-800"
-            }`}
-          >
-            📊 Reports
-          </button>
-        </div>
+      {/* Tab Navigation */}
+      <div className="flex gap-4 mb-6">
+        <button 
+          onClick={() => setActiveTab("members")} 
+          className={`px-6 py-3 rounded-lg font-semibold transition ${
+            activeTab === "members" ? "bg-red-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          Members & Loans
+        </button>
+        <button 
+          onClick={() => setActiveTab("reports")} 
+          className={`px-6 py-3 rounded-lg font-semibold transition ${
+            activeTab === "reports" ? "bg-red-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          Reports
+        </button>
       </div>
 
-      {/* Members & Loans Tab */}
+      {/* Members Tab */}
       {activeTab === "members" && (
         <>
-          {/* Add/Edit Member Form */}
+          {/* Add Member Form */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">
-              {editMember ? "Edit Member" : "Add New Member"}
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <input 
-                type="text" 
-                placeholder="Full Name *" 
-                value={editMember?.full_name || newMember.full_name} 
-                onChange={e => editMember 
-                  ? setEditMember({...editMember, full_name: e.target.value}) 
-                  : setNewMember({...newMember, full_name: e.target.value})} 
-                className="border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500 focus:border-transparent" 
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Add New Member</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input
+                type="text"
+                placeholder="Full Name"
+                className="border border-gray-300 p-3 rounded-lg"
+                value={newMember.full_name}
+                onChange={(e) => setNewMember({...newMember, full_name: e.target.value})}
               />
-              <input 
-                type="text" 
-                placeholder="ID Number *" 
-                value={editMember?.id_number || newMember.id_number} 
-                onChange={e => editMember 
-                  ? setEditMember({...editMember, id_number: e.target.value}) 
-                  : setNewMember({...newMember, id_number: e.target.value})} 
-                className="border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500 focus:border-transparent" 
+              <input
+                type="text"
+                placeholder="ID Number"
+                className="border border-gray-300 p-3 rounded-lg"
+                value={newMember.id_number}
+                onChange={(e) => setNewMember({...newMember, id_number: e.target.value})}
               />
-              <input 
-                type="email" 
-                placeholder="Email *" 
-                value={editMember?.email || newMember.email} 
-                onChange={e => editMember 
-                  ? setEditMember({...editMember, email: e.target.value}) 
-                  : setNewMember({...newMember, email: e.target.value})} 
-                className="border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500 focus:border-transparent" 
+              <input
+                type="email"
+                placeholder="Email"
+                className="border border-gray-300 p-3 rounded-lg"
+                value={newMember.email}
+                onChange={(e) => setNewMember({...newMember, email: e.target.value})}
               />
-              <input 
-                type="tel" 
-                placeholder="Phone Number *" 
-                value={editMember?.phone || newMember.phone} 
-                onChange={e => editMember 
-                  ? setEditMember({...editMember, phone: e.target.value}) 
-                  : setNewMember({...newMember, phone: e.target.value})} 
-                className="border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500 focus:border-transparent" 
+              <input
+                type="tel"
+                placeholder="Phone Number"
+                className="border border-gray-300 p-3 rounded-lg"
+                value={newMember.phone}
+                onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
               />
-              {!editMember && (
-                <select 
-                  value={newMember.role} 
-                  onChange={e => setNewMember({...newMember, role: e.target.value})} 
-                  className="border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                >
-                  <option value="MEMBER">Member</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-              )}
-              {!editMember && (
-                <input 
-                  type="password" 
-                  placeholder="Password *" 
-                  value={newMember.password} 
-                  onChange={e => setNewMember({...newMember, password: e.target.value})} 
-                  className="border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500 focus:border-transparent" 
-                />
-              )}
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button 
-                onClick={editMember ? updateMember : addMember} 
-                className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition"
+              <input
+                type="password"
+                placeholder="Password"
+                className="border border-gray-300 p-3 rounded-lg"
+                value={newMember.password}
+                onChange={(e) => setNewMember({...newMember, password: e.target.value})}
+              />
+              <button
+                onClick={addMember}
+                className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold"
               >
-                {editMember ? "Update Member" : "Add Member"}
+                Add Member
               </button>
-              {editMember && (
-                <button 
-                  onClick={() => setEditMember(null)} 
-                  className="bg-gray-300 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-400 transition"
-                >
-                  Cancel
-                </button>
-              )}
             </div>
           </div>
 
@@ -302,15 +245,13 @@ const AdminDashboard = () => {
             <h2 className="text-xl font-bold text-gray-800 mb-4">Members Management</h2>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-red-50">
+                <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Role</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">SACCO #</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">ID Number</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Email</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Phone</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Contact</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Savings</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Loan Limit</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Add Savings</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Actions</th>
                   </tr>
@@ -318,27 +259,30 @@ const AdminDashboard = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {members.map(m => (
                     <tr key={m.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm text-gray-900">{m.full_name}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{m.role}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{m.sacco_number}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{m.id_number}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{m.email}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{m.phone}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-900">{m.full_name}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{m.id_number}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="text-gray-900">{m.email}</div>
+                        <div className="text-gray-600 text-xs">{m.phone}</div>
+                      </td>
                       <td className="px-4 py-3 text-sm font-semibold text-green-600">
-                        KES {parseFloat(m.savings || 0).toLocaleString()}
+                        KES {parseFloat(m.total_savings || 0).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-blue-600">
+                        KES {parseFloat(m.loan_limit || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex gap-1">
-                          <input 
-                            type="number" 
-                            placeholder="Amount" 
-                            className="border border-gray-300 p-1 rounded w-24 text-sm" 
-                            value={savingsAmount[m.id] || ""} 
-                            onChange={e => setSavingsAmount({...savingsAmount, [m.id]: e.target.value})} 
+                          <input
+                            type="number"
+                            placeholder="Amount"
+                            className="border border-gray-300 p-1 rounded w-24 text-sm"
+                            value={savingsAmount[m.id] || ""}
+                            onChange={e => setSavingsAmount({...savingsAmount, [m.id]: e.target.value})}
                           />
-                          <button 
-                            onClick={() => updateSavings(m.id)} 
-                            className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition"
+                          <button
+                            onClick={() => updateSavings(m.id)}
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition"
                           >
                             Add
                           </button>
@@ -346,14 +290,14 @@ const AdminDashboard = () => {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex gap-1">
-                          <button 
-                            onClick={() => setEditMember(m)} 
-                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition"
+                          <button
+                            onClick={() => setEditMember(m)}
+                            className="bg-yellow-600 text-white px-3 py-1 rounded text-sm hover:bg-yellow-700 transition"
                           >
                             Edit
                           </button>
-                          <button 
-                            onClick={() => deleteMember(m.id)} 
+                          <button
+                            onClick={() => deleteMember(m.id)}
                             className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition"
                           >
                             Delete
@@ -366,6 +310,59 @@ const AdminDashboard = () => {
               </table>
             </div>
           </div>
+
+          {/* Edit Member Modal */}
+          {editMember && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                <h2 className="text-2xl font-bold text-gray-800 mb-6">Edit Member</h2>
+                <div className="space-y-4">
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    className="w-full border border-gray-300 p-3 rounded-lg"
+                    value={editMember.full_name}
+                    onChange={(e) => setEditMember({...editMember, full_name: e.target.value})}
+                  />
+                  <input
+                    type="text"
+                    placeholder="ID Number"
+                    className="w-full border border-gray-300 p-3 rounded-lg"
+                    value={editMember.id_number}
+                    onChange={(e) => setEditMember({...editMember, id_number: e.target.value})}
+                  />
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    className="w-full border border-gray-300 p-3 rounded-lg"
+                    value={editMember.email}
+                    onChange={(e) => setEditMember({...editMember, email: e.target.value})}
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Phone"
+                    className="w-full border border-gray-300 p-3 rounded-lg"
+                    value={editMember.phone}
+                    onChange={(e) => setEditMember({...editMember, phone: e.target.value})}
+                  />
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setEditMember(null)}
+                      className="flex-1 bg-gray-200 text-gray-800 px-6 py-2 rounded-lg hover:bg-gray-300 transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={updateMember}
+                      className="flex-1 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+                    >
+                      Update
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Loans Table */}
           <div className="bg-white shadow rounded-lg p-6">

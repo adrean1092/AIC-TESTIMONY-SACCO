@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-
-const API_BASE_URL = "https://aic-testimony-sacco.onrender.com/api";
+import { API_BASE_URL } from "../api"; // Import from centralized config
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -10,12 +9,27 @@ export default function HomePage() {
     totalLoans: 0,
     totalSavings: 0
   });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    // Fetch public stats
     fetch(`${API_BASE_URL}/public/stats`)
-      .then(res => res.json())
-      .then(data => setStats(data))
-      .catch(err => console.error("Error fetching stats:", err));
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch stats');
+        return res.json();
+      })
+      .then(data => {
+        setStats(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Error fetching stats:", err);
+        setError(err.message);
+        setLoading(false);
+        // Set default stats even on error
+        setStats({ members: 0, totalLoans: 0, totalSavings: 0 });
+      });
   }, []);
 
   return (
@@ -56,24 +70,31 @@ export default function HomePage() {
           <h3 className="text-3xl font-bold text-center text-gray-800 mb-12">
             Our Impact
           </h3>
+          
+          {error && (
+            <div className="text-center text-red-600 mb-6">
+              <p className="text-sm">Unable to load live stats. Showing default values.</p>
+            </div>
+          )}
+          
           <div className="grid md:grid-cols-3 gap-8">
             <div className="text-center p-8 bg-red-50 rounded-lg shadow">
               <div className="text-5xl font-bold text-red-700 mb-2">
-                {stats.members}
+                {loading ? "..." : stats.members}
               </div>
               <div className="text-gray-600 text-lg">Active Members</div>
             </div>
 
             <div className="text-center p-8 bg-blue-50 rounded-lg shadow">
               <div className="text-5xl font-bold text-blue-700 mb-2">
-                KES {stats.totalLoans.toLocaleString()}
+                {loading ? "..." : `KES ${stats.totalLoans.toLocaleString()}`}
               </div>
               <div className="text-gray-600 text-lg">Total Loans Disbursed</div>
             </div>
 
             <div className="text-center p-8 bg-green-50 rounded-lg shadow">
               <div className="text-5xl font-bold text-green-700 mb-2">
-                KES {stats.totalSavings.toLocaleString()}
+                {loading ? "..." : `KES ${stats.totalSavings.toLocaleString()}`}
               </div>
               <div className="text-gray-600 text-lg">Total Savings</div>
             </div>
