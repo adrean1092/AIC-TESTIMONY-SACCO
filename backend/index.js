@@ -9,7 +9,7 @@ const corsOptions = {
   origin: [
     'http://localhost:5173',        // Vite dev server
     'http://localhost:3000',        // React dev server  
-    'https://your-frontend-domain.com', // Replace with your actual frontend domain
+    'https://aic-testimony-sacco-1.onrender.com', // Replace with your actual frontend domain
     // Add more origins as needed
   ],
   credentials: true,
