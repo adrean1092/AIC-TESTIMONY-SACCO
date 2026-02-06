@@ -19,10 +19,11 @@ router.get("/members", auth, async (req, res) => {
         u.phone, 
         u.role,
         u.sacco_number,
+        u.loan_limit,
         COALESCE(SUM(s.amount), 0) AS savings
       FROM users u
       LEFT JOIN savings s ON s.user_id = u.id
-      GROUP BY u.id, u.full_name, u.id_number, u.email, u.phone, u.role, u.sacco_number
+      GROUP BY u.id, u.full_name, u.id_number, u.email, u.phone, u.role, u.sacco_number, u.loan_limit
       ORDER BY u.created_at DESC
     `);
     res.json(members.rows);
