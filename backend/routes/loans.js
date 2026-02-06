@@ -4,6 +4,90 @@ const pool = require("../db");
 const auth = require("../middleware/auth");
 const { sendGuarantorNotification } = require("../utils/sendEmail");
 
+// ✅ NEW: ADMIN gets all loans with member details
+router.get("/", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Forbidden: Admin access required" });
+  }
+
+  try {
+    const loansRes = await pool.query(
+      `SELECT 
+        l.id,
+        l.user_id,
+        l.amount,
+        l.principal_amount,
+        l.initial_amount,
+        l.interest_rate,
+        l.repayment_period,
+        l.loan_purpose,
+        l.status,
+        l.created_at,
+        u.full_name,
+        u.email,
+        u.phone,
+        u.id_number
+      FROM loans l
+      JOIN users u ON l.user_id = u.id
+      ORDER BY l.created_at DESC`
+    );
+
+    // Get guarantor counts for each loan
+    const loansWithCounts = await Promise.all(
+      loansRes.rows.map(async (loan) => {
+        const guarantorsRes = await pool.query(
+          `SELECT guarantor_type, COUNT(*) as count
+           FROM guarantors
+           WHERE loan_id = $1
+           GROUP BY guarantor_type`,
+          [loan.id]
+        );
+
+        const counts = {
+          members: 0,
+          churchOfficials: 0,
+          witnesses: 0
+        };
+
+        guarantorsRes.rows.forEach(row => {
+          if (row.guarantor_type === 'MEMBER') counts.members = parseInt(row.count);
+          if (row.guarantor_type === 'CHURCH_OFFICIAL') counts.churchOfficials = parseInt(row.count);
+          if (row.guarantor_type === 'WITNESS') counts.witnesses = parseInt(row.count);
+        });
+
+        return {
+          id: loan.id,
+          userId: loan.user_id,
+          memberName: loan.full_name,
+          memberEmail: loan.email,
+          memberPhone: loan.phone,
+          memberIdNumber: loan.id_number,
+          amount: parseFloat(loan.amount),
+          principalAmount: parseFloat(loan.principal_amount),
+          initialAmount: parseFloat(loan.initial_amount),
+          interestRate: parseFloat(loan.interest_rate),
+          repaymentPeriod: loan.repayment_period,
+          loanPurpose: loan.loan_purpose,
+          status: loan.status,
+          createdAt: loan.created_at,
+          guarantorCounts: counts
+        };
+      })
+    );
+
+    res.json({ 
+      success: true,
+      loans: loansWithCounts 
+    });
+  } catch (err) {
+    console.error("Error fetching loans:", err);
+    res.status(500).json({ 
+      message: "Server error while fetching loans",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
 // MEMBER requests a loan
 router.post("/", auth, async (req, res) => {
   if (req.user.role !== "MEMBER") return res.status(403).json({ message: "Forbidden" });
@@ -215,10 +299,9 @@ router.post("/", auth, async (req, res) => {
             sub_location, place_of_work, shares
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [
-            loanId, guarantor.name, guarantor.email, guarantor.idNumber,
-            guarantor.phone, 'MEMBER', guarantor.county,
-            guarantor.location, guarantor.subLocation, guarantor.placeOfWork,
-            guarantor.shares
+            loanId, guarantor.name, guarantor.email, guarantor.idNumber, guarantor.phone,
+            'MEMBER', guarantor.county, guarantor.location,
+            guarantor.subLocation, guarantor.placeOfWork, guarantor.shares
           ]
         );
 
@@ -230,7 +313,7 @@ router.post("/", auth, async (req, res) => {
             memberEmail: member.email,
             memberIdNumber: member.id_number,
             loanAmount: amount,
-            guarantorType: 'Member Guarantor',
+            guarantorType: 'SACCO Member Guarantor',
             guarantorName: guarantor.name
           });
         } catch (emailError) {
