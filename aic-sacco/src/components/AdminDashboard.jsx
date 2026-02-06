@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import API from "../api"; // Use centralized API
+import API from "../api";
 import Reports from "./Reports";
+import DividendsManagement from "./Dividendsmanagement";
 
 const AdminDashboard = () => {
-  const [activeTab, setActiveTab] = useState("members"); // members, reports
+  const [activeTab, setActiveTab] = useState("members"); // members, dividends, reports
   const [members, setMembers] = useState([]);
   const [loans, setLoans] = useState([]);
   const [newMember, setNewMember] = useState({ 
@@ -112,9 +113,9 @@ const AdminDashboard = () => {
     }
   };
 
-  const approveLoan = async (id) => {
+  const approveLoan = async (loanId) => {
     try {
-      await API.put(`/admin/loans/${id}/approve`, {});
+      await API.put(`/admin/loans/${loanId}/approve`);
       loadLoans();
       loadMembers();
       alert("Loan approved successfully!");
@@ -124,9 +125,9 @@ const AdminDashboard = () => {
     }
   };
 
-  const rejectLoan = async (id) => {
+  const rejectLoan = async (loanId) => {
     try {
-      await API.put(`/admin/loans/${id}/reject`, {});
+      await API.put(`/admin/loans/${loanId}/reject`);
       loadLoans();
       alert("Loan rejected successfully!");
     } catch (error) {
@@ -135,17 +136,21 @@ const AdminDashboard = () => {
     }
   };
 
-  const recordPayment = async (id) => {
-    const amount = paymentAmount[id];
+  const recordPayment = async (loanId) => {
+    const amount = paymentAmount[loanId];
     if (!amount || parseFloat(amount) <= 0) {
       alert("Please enter a valid payment amount");
       return;
     }
+
     try {
-      const res = await API.put(`/admin/loans/${id}/payment`, { amount: parseFloat(amount) });
-      setPaymentAmount({ ...paymentAmount, [id]: "" });
+      const res = await API.post(`/admin/loans/${loanId}/payment`, { 
+        paymentAmount: parseFloat(amount) 
+      });
+      
       setPaymentResult(res.data);
       setShowPaymentModal(true);
+      setPaymentAmount({ ...paymentAmount, [loanId]: "" });
       loadLoans();
       loadMembers();
     } catch (error) {
@@ -180,6 +185,14 @@ const AdminDashboard = () => {
           Members & Loans
         </button>
         <button 
+          onClick={() => setActiveTab("dividends")} 
+          className={`px-6 py-3 rounded-lg font-semibold transition ${
+            activeTab === "dividends" ? "bg-red-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          Dividends
+        </button>
+        <button 
           onClick={() => setActiveTab("reports")} 
           className={`px-6 py-3 rounded-lg font-semibold transition ${
             activeTab === "reports" ? "bg-red-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
@@ -189,66 +202,74 @@ const AdminDashboard = () => {
         </button>
       </div>
 
-      {/* Members Tab */}
+      {/* Members & Loans Tab */}
       {activeTab === "members" && (
         <>
           {/* Add Member Form */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Add New Member</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Add New User</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <input
-                type="text"
-                placeholder="Full Name"
+              <input 
+                type="text" 
+                placeholder="Full Name" 
                 className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.full_name}
-                onChange={(e) => setNewMember({...newMember, full_name: e.target.value})}
+                value={newMember.full_name} 
+                onChange={e => setNewMember({...newMember, full_name: e.target.value})} 
               />
-              <input
-                type="text"
-                placeholder="ID Number"
+              <input 
+                type="text" 
+                placeholder="ID Number" 
                 className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.id_number}
-                onChange={(e) => setNewMember({...newMember, id_number: e.target.value})}
+                value={newMember.id_number} 
+                onChange={e => setNewMember({...newMember, id_number: e.target.value})} 
               />
-              <input
-                type="email"
-                placeholder="Email"
+              <input 
+                type="email" 
+                placeholder="Email" 
                 className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.email}
-                onChange={(e) => setNewMember({...newMember, email: e.target.value})}
+                value={newMember.email} 
+                onChange={e => setNewMember({...newMember, email: e.target.value})} 
               />
-              <input
-                type="tel"
-                placeholder="Phone Number"
+              <input 
+                type="text" 
+                placeholder="Phone" 
                 className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.phone}
-                onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
+                value={newMember.phone} 
+                onChange={e => setNewMember({...newMember, phone: e.target.value})} 
               />
-              <input
-                type="password"
-                placeholder="Password"
+              <input 
+                type="password" 
+                placeholder="Password" 
                 className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.password}
-                onChange={(e) => setNewMember({...newMember, password: e.target.value})}
+                value={newMember.password} 
+                onChange={e => setNewMember({...newMember, password: e.target.value})} 
               />
-              <button
-                onClick={addMember}
-                className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold"
+              <select
+                className="border border-gray-300 p-3 rounded-lg bg-white"
+                value={newMember.role}
+                onChange={e => setNewMember({...newMember, role: e.target.value})}
               >
-                Add Member
+                <option value="MEMBER">Member</option>
+                <option value="ADMIN">Admin</option>
+              </select>
+              <button 
+                onClick={addMember} 
+                className="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition font-semibold"
+              >
+                Add {newMember.role === "ADMIN" ? "Admin" : "Member"}
               </button>
             </div>
           </div>
 
           {/* Members Table */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Members Management</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Users List</h2>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">ID Number</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Member</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Role</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Contact</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Savings</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Loan Limit</th>
@@ -259,30 +280,42 @@ const AdminDashboard = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {members.map(m => (
                     <tr key={m.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-900">{m.full_name}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{m.id_number}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="font-semibold text-gray-900">{m.full_name}</div>
+                        <div className="text-xs text-gray-500">ID: {m.id_number}</div>
+                        <div className="text-xs text-gray-500">SACCO: {m.sacco_number}</div>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          m.role === 'ADMIN' 
+                            ? 'bg-purple-100 text-purple-800' 
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {m.role}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="text-gray-900">{m.email}</div>
-                        <div className="text-gray-600 text-xs">{m.phone}</div>
+                        <div className="text-xs text-gray-500">{m.phone}</div>
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold text-green-600">
-                        KES {parseFloat(m.total_savings || 0).toLocaleString()}
+                        KES {m.savings?.toLocaleString() || 0}
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold text-blue-600">
-                        KES {parseFloat(m.loan_limit || 0).toLocaleString()}
+                        KES {m.loan_limit?.toLocaleString() || 0}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex gap-1">
-                          <input
-                            type="number"
-                            placeholder="Amount"
-                            className="border border-gray-300 p-1 rounded w-24 text-sm"
-                            value={savingsAmount[m.id] || ""}
-                            onChange={e => setSavingsAmount({...savingsAmount, [m.id]: e.target.value})}
+                          <input 
+                            type="number" 
+                            placeholder="Amount" 
+                            className="border border-gray-300 p-1 rounded w-24 text-sm" 
+                            value={savingsAmount[m.id] || ""} 
+                            onChange={e => setSavingsAmount({...savingsAmount, [m.id]: e.target.value})} 
                           />
-                          <button
-                            onClick={() => updateSavings(m.id)}
-                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition"
+                          <button 
+                            onClick={() => updateSavings(m.id)} 
+                            className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition"
                           >
                             Add
                           </button>
@@ -290,14 +323,14 @@ const AdminDashboard = () => {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex gap-1">
-                          <button
-                            onClick={() => setEditMember(m)}
-                            className="bg-yellow-600 text-white px-3 py-1 rounded text-sm hover:bg-yellow-700 transition"
+                          <button 
+                            onClick={() => setEditMember(m)} 
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition"
                           >
                             Edit
                           </button>
-                          <button
-                            onClick={() => deleteMember(m.id)}
+                          <button 
+                            onClick={() => deleteMember(m.id)} 
                             className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition"
                           >
                             Delete
@@ -314,33 +347,26 @@ const AdminDashboard = () => {
           {/* Edit Member Modal */}
           {editMember && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+              <div className="bg-white p-8 rounded-lg shadow-xl max-w-md w-full">
                 <h2 className="text-2xl font-bold text-gray-800 mb-6">Edit Member</h2>
                 <div className="space-y-4">
-                  <input
-                    type="text"
-                    placeholder="Full Name"
+                  <input 
+                    type="text" 
+                    placeholder="Full Name" 
                     className="w-full border border-gray-300 p-3 rounded-lg"
                     value={editMember.full_name}
                     onChange={(e) => setEditMember({...editMember, full_name: e.target.value})}
                   />
-                  <input
-                    type="text"
-                    placeholder="ID Number"
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    value={editMember.id_number}
-                    onChange={(e) => setEditMember({...editMember, id_number: e.target.value})}
-                  />
-                  <input
-                    type="email"
-                    placeholder="Email"
+                  <input 
+                    type="email" 
+                    placeholder="Email" 
                     className="w-full border border-gray-300 p-3 rounded-lg"
                     value={editMember.email}
                     onChange={(e) => setEditMember({...editMember, email: e.target.value})}
                   />
-                  <input
-                    type="tel"
-                    placeholder="Phone"
+                  <input 
+                    type="text" 
+                    placeholder="Phone" 
                     className="w-full border border-gray-300 p-3 rounded-lg"
                     value={editMember.phone}
                     onChange={(e) => setEditMember({...editMember, phone: e.target.value})}
@@ -348,15 +374,15 @@ const AdminDashboard = () => {
                   <div className="flex gap-3">
                     <button
                       onClick={() => setEditMember(null)}
-                      className="flex-1 bg-gray-200 text-gray-800 px-6 py-2 rounded-lg hover:bg-gray-300 transition"
+                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg hover:bg-gray-300 transition font-semibold"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={updateMember}
-                      className="flex-1 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+                      className="flex-1 bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 transition font-semibold"
                     >
-                      Update
+                      Save Changes
                     </button>
                   </div>
                 </div>
@@ -381,14 +407,14 @@ const AdminDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {loans.map(l => {
+                  {loans.map((l, idx) => {
                     const principal = parseFloat(l.principal_amount || 0);
                     const total = parseFloat(l.initial_amount || 0);
                     const interest = total - principal;
                     const currentBalance = parseFloat(l.amount || 0);
                     
                     return (
-                      <tr key={l.id} className="hover:bg-gray-50">
+                      <tr key={`loan-${idx}`} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm">
                           <div className="font-semibold text-gray-900">{l.memberName}</div>
                           <div className="text-xs text-gray-500">{l.saccoNumber}</div>
@@ -467,6 +493,9 @@ const AdminDashboard = () => {
         </>
       )}
 
+      {/* Dividends Tab */}
+      {activeTab === "dividends" && <DividendsManagement />}
+
       {/* Reports Tab */}
       {activeTab === "reports" && <Reports />}
 
@@ -480,7 +509,7 @@ const AdminDashboard = () => {
               <div className="bg-gray-50 p-3 rounded">
                 <p className="text-sm text-gray-600">Amount Paid</p>
                 <p className="text-xl font-bold text-gray-900">
-                  KES {paymentResult.paid.toLocaleString()}
+                  KES {paymentResult.paid?.toLocaleString()}
                 </p>
               </div>
               
@@ -488,58 +517,34 @@ const AdminDashboard = () => {
                 <div className="bg-blue-50 p-3 rounded">
                   <p className="text-xs text-gray-600">Interest Paid</p>
                   <p className="text-sm font-bold text-blue-700">
-                    KES {paymentResult.breakdown?.interestPaid.toLocaleString()}
+                    KES {paymentResult.breakdown?.interestPaid?.toLocaleString()}
                   </p>
                 </div>
                 <div className="bg-purple-50 p-3 rounded">
                   <p className="text-xs text-gray-600">Principal Paid</p>
                   <p className="text-sm font-bold text-purple-700">
-                    KES {paymentResult.breakdown?.principalPaid.toLocaleString()}
+                    KES {paymentResult.breakdown?.principalPaid?.toLocaleString()}
                   </p>
                 </div>
               </div>
               
-              <div className="bg-orange-50 p-3 rounded">
-                <p className="text-sm text-gray-600">Remaining Balance</p>
-                <p className="text-xl font-bold text-orange-600">
-                  KES {paymentResult.remaining.toLocaleString()}
-                </p>
-              </div>
-              
               <div className="bg-green-50 p-3 rounded">
-                <p className="text-sm text-gray-600">New Loan Limit</p>
-                <p className="text-lg font-bold text-green-600">
-                  KES {paymentResult.newLoanLimit.toLocaleString()}
+                <p className="text-sm text-gray-600">Remaining Balance</p>
+                <p className="text-xl font-bold text-green-700">
+                  KES {paymentResult.remaining?.toLocaleString()}
                 </p>
               </div>
               
-              {paymentResult.totals && (
-                <div className="border-t pt-3 mt-3">
-                  <p className="text-xs text-gray-500 mb-2">Total Progress</p>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <p className="text-gray-600">Total Interest Paid</p>
-                      <p className="font-semibold">
-                        KES {paymentResult.totals.totalInterestPaid.toLocaleString()} / {paymentResult.totals.totalInterest.toLocaleString()}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Total Principal Paid</p>
-                      <p className="font-semibold">
-                        KES {paymentResult.totals.totalPrincipalPaid.toLocaleString()} / {paymentResult.totals.totalPrincipal.toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
+              {paymentResult.fullyPaid && (
+                <div className="bg-green-100 p-3 rounded text-center">
+                  <p className="text-green-800 font-bold">🎉 Loan Fully Paid!</p>
                 </div>
               )}
             </div>
             
             <button
-              onClick={() => {
-                setShowPaymentModal(false);
-                setPaymentResult(null);
-              }}
-              className="w-full bg-gray-200 text-gray-800 px-6 py-2 rounded-lg hover:bg-gray-300 transition"
+              onClick={() => setShowPaymentModal(false)}
+              className="w-full bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 transition font-semibold"
             >
               Close
             </button>

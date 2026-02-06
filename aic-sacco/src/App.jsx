@@ -1,120 +1,155 @@
 import { useState, useEffect } from "react";
-import { Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import HomePage from "./components/HomePage";
 import LoginPage from "./components/LoginPage";
-import AdminDashboard from "./components/AdminDashboard";
 import MemberDashboard from "./components/MemberDashboard";
-import API, { setAuthToken } from "./api";
+import AdminDashboard from "./components/AdminDashboard";
+import MemberDeclarationForm from "./components/MemberDeclarationForm";
+import API from "./api";
 
-export default function App() {
-  const [auth, setAuth] = useState(null);
-  const [dashboardData, setDashboardData] = useState(null);
+function App() {
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const [needsDeclaration, setNeedsDeclaration] = useState(false);
 
-  // Check for existing token on app load
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const role = localStorage.getItem('role');
-    const userStr = localStorage.getItem('user');
-    
-    if (token && role && userStr) {
+    const token = localStorage.getItem("token");
+    const role = localStorage.getItem("role");
+    const storedUser = localStorage.getItem("user");
+
+    if (token && role && storedUser) {
+      setUser({ token, role, user: JSON.parse(storedUser) });
+      checkDeclarationStatus(role);
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const checkDeclarationStatus = async (role) => {
+    if (role === "MEMBER") {
       try {
-        const user = JSON.parse(userStr);
-        setAuth({ token, role, user });
-        setAuthToken(token);
-      } catch (err) {
-        console.error("Failed to restore session:", err);
-        localStorage.clear();
+        const res = await API.get("/members/me");
+        if (!res.data.declarationAccepted) {
+          setNeedsDeclaration(true);
+        }
+      } catch (error) {
+        console.error("Error checking declaration status:", error);
       }
     }
     setLoading(false);
-  }, []);
+  };
 
-  const handleLogin = ({ token, role, user }) => {
-    setAuth({ token, role, user });
-    setAuthToken(token);
-    localStorage.setItem('role', role);
-    localStorage.setItem('user', JSON.stringify(user));
+  const handleLogin = async (loginData) => {
+    const { token, role, user: userData } = loginData;
     
-    // Navigate to appropriate dashboard
-    if (role === "ADMIN") {
-      navigate("/admin");
+    localStorage.setItem("token", token);
+    localStorage.setItem("role", role);
+    localStorage.setItem("user", JSON.stringify(userData));
+    
+    setUser({ token, role, user: userData });
+    
+    // Check if member needs to complete declaration
+    if (role === "MEMBER") {
+      await checkDeclarationStatus(role);
     } else {
-      navigate("/dashboard");
+      setLoading(false);
     }
   };
 
   const handleLogout = () => {
-    setAuth(null);
-    setDashboardData(null);
-    setAuthToken(null);
-    localStorage.removeItem('role');
-    localStorage.removeItem('user');
-    navigate("/");
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("user");
+    setUser(null);
+    setNeedsDeclaration(false);
   };
 
-  useEffect(() => {
-    if (!auth) return;
-
-    const fetchDashboard = async () => {
-      try {
-        if (auth.role === "ADMIN") {
-          setDashboardData({ role: "ADMIN" });
-        } else {
-          const res = await API.get("/members/me");
-          setDashboardData(res.data);
-        }
-      } catch (err) {
-        console.error("Dashboard fetch error:", err);
-        if (err.response?.status === 401) {
-          alert("Session expired. Please login again.");
-          handleLogout();
-        } else {
-          alert("Failed to fetch dashboard: " + err.message);
-        }
-      }
-    };
-
-    fetchDashboard();
-  }, [auth]);
+  const handleDeclarationComplete = () => {
+    setNeedsDeclaration(false);
+    // Refresh the page to load member dashboard
+    window.location.reload();
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-red-700 text-lg">Loading...</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-700 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
       </div>
     );
   }
 
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
+      {/* Public Routes */}
+      <Route path="/" element={!user ? <HomePage /> : <Navigate to="/dashboard" />} />
       <Route 
-        path="/admin" 
-        element={
-          auth?.role === "ADMIN" && dashboardData ? (
-            <AdminDashboard data={dashboardData} onLogout={handleLogout} />
-          ) : (
-            <div className="min-h-screen flex items-center justify-center">
-              <p className="text-red-700 text-lg">Loading...</p>
-            </div>
-          )
-        } 
+        path="/login" 
+        element={!user ? <LoginPage onLogin={handleLogin} /> : <Navigate to="/dashboard" />} 
       />
-      <Route 
-        path="/dashboard" 
+
+      {/* Protected Routes */}
+      <Route
+        path="/dashboard"
         element={
-          auth?.role === "MEMBER" && dashboardData ? (
-            <MemberDashboard data={dashboardData} onLogout={handleLogout} />
+          !user ? (
+            <Navigate to="/login" />
+          ) : needsDeclaration ? (
+            <MemberDeclarationForm 
+              onComplete={handleDeclarationComplete}
+              memberData={user.user}
+            />
+          ) : user.role === "ADMIN" ? (
+            <AdminDashboard onLogout={handleLogout} />
           ) : (
-            <div className="min-h-screen flex items-center justify-center">
-              <p className="text-red-700 text-lg">Loading...</p>
-            </div>
+            <MemberDashboardWrapper onLogout={handleLogout} />
           )
-        } 
+        }
       />
+
+      {/* Catch all */}
+      <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
 }
+
+// Wrapper component to fetch member data
+function MemberDashboardWrapper({ onLogout }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMemberData();
+  }, []);
+
+  const fetchMemberData = async () => {
+    try {
+      const res = await API.get("/members/me");
+      setData(res.data);
+    } catch (err) {
+      console.error("Error fetching member data:", err);
+      if (err.response?.status === 401) {
+        onLogout();
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-700 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <MemberDashboard data={data} onLogout={onLogout} />;
+}
+
+export default App;

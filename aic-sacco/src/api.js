@@ -9,7 +9,7 @@ const isDevelopment =
 // 📡 API Base URLs for each environment
 const API_URLS = {
   development: "http://localhost:5000/api",
-  production: "https://aic-testimony-sacco.onrender.com/api"
+  production: "https://aic-testimony-sacco1.onrender.com/api"  // ✅ FIXED - added "1"
 };
 
 // Select the correct API URL based on environment
@@ -74,7 +74,7 @@ if (token) {
 }
 
 // 📊 Log current configuration (helps with debugging)
-console.log(`🌐 API Environment: ${isDevelopment ? 'Development' : 'Production'}`);
+console.log(`🌐 Environment: ${isDevelopment ? 'Development' : 'Production'}`);
 console.log(`📡 API Base URL: ${API_BASE_URL}`);
 
 export default API;

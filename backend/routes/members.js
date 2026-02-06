@@ -10,7 +10,9 @@ router.get("/me", auth, async (req, res) => {
 
   try {
     const memberRes = await pool.query(
-      "SELECT id, full_name AS name, email, loan_limit FROM users WHERE id=$1", 
+      `SELECT id, full_name AS name, email, loan_limit, 
+              declaration_accepted, declaration_date 
+       FROM users WHERE id=$1`, 
       [req.user.id]
     );
     
@@ -37,12 +39,29 @@ router.get("/me", auth, async (req, res) => {
       [req.user.id]
     );
 
+    // Calculate total outstanding loan balance (only approved loans)
+    const outstandingRes = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) as total_outstanding 
+       FROM loans 
+       WHERE user_id=$1 AND status='APPROVED' AND amount > 0`,
+      [req.user.id]
+    );
+
+    const member = memberRes.rows[0];
+    const totalLoanLimit = parseFloat(member.loan_limit) || 0;
+    const totalOutstanding = parseFloat(outstandingRes.rows[0].total_outstanding) || 0;
+    const availableLoanLimit = totalLoanLimit - totalOutstanding;
+
     res.json({
-      id: memberRes.rows[0].id,
-      name: memberRes.rows[0].name,
-      email: memberRes.rows[0].email,
+      id: member.id,
+      name: member.name,
+      email: member.email,
       savings: parseFloat(savingsRes.rows[0].savings) || 0,
-      loanLimit: parseFloat(memberRes.rows[0].loan_limit) || 0,
+      loanLimit: totalLoanLimit,
+      outstandingLoans: totalOutstanding,
+      availableLoanLimit: Math.max(0, availableLoanLimit),
+      declarationAccepted: member.declaration_accepted,
+      declarationDate: member.declaration_date,
       loans: loansRes.rows.map(l => ({
         id: l.id,
         amount: parseFloat(l.amount),
@@ -58,6 +77,64 @@ router.get("/me", auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Submit member declaration
+router.post("/submit-declaration", auth, async (req, res) => {
+  if (req.user.role !== "MEMBER") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const { 
+    fullName, 
+    idNumber, 
+    phone, 
+    email, 
+    declarations, 
+    signature, 
+    date, 
+    submittedAt 
+  } = req.body;
+
+  try {
+    // Validate all declarations are accepted
+    const allAccepted = Object.values(declarations).every(v => v === true);
+    if (!allAccepted) {
+      return res.status(400).json({ 
+        message: "All declarations must be accepted" 
+      });
+    }
+
+    // Update user record with declaration
+    await pool.query(
+      `UPDATE users 
+       SET declaration_accepted = true,
+           declaration_date = NOW(),
+           declaration_data = $1
+       WHERE id = $2`,
+      [
+        JSON.stringify({
+          fullName,
+          idNumber,
+          phone,
+          email,
+          declarations,
+          signature,
+          date,
+          submittedAt
+        }),
+        req.user.id
+      ]
+    );
+
+    res.json({ 
+      success: true,
+      message: "Declaration submitted successfully" 
+    });
+  } catch (err) {
+    console.error("Error submitting declaration:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -112,7 +189,7 @@ router.get("/savings-history", auth, async (req, res) => {
   
   try {
     const savingsHistory = await pool.query(
-      "SELECT id, amount, saved_at FROM savings WHERE user_id=$1 ORDER BY saved_at DESC",
+      "SELECT id, amount, saved_at, source FROM savings WHERE user_id=$1 ORDER BY saved_at DESC",
       [req.user.id]
     );
     
@@ -120,7 +197,8 @@ router.get("/savings-history", auth, async (req, res) => {
       history: savingsHistory.rows.map(s => ({
         id: s.id,
         amount: parseFloat(s.amount),
-        savedAt: s.saved_at
+        savedAt: s.saved_at,
+        source: s.source || 'Savings Deposit'
       }))
     });
   } catch (err) {
