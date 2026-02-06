@@ -9,7 +9,9 @@ const corsOptions = {
   origin: [
     'http://localhost:5173',
     'http://localhost:3000',
-    'https://aic-testimony-sacco-1.onrender.com',
+    'https://aic-sacco-frontend.onrender.com',
+    'https://aictestimonysacco.com',
+    'https://www.aictestimonysacco.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
