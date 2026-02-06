@@ -5,9 +5,9 @@ import LoginPage from "./components/LoginPage";
 import MemberDashboard from "./components/MemberDashboard";
 import AdminDashboard from "./components/AdminDashboard";
 import MemberDeclarationForm from "./components/MemberDeclarationForm";
-import API from "./api";
+import API, { setAuthToken } from "./api";
 
-function App() {
+export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [needsDeclaration, setNeedsDeclaration] = useState(false);
@@ -18,6 +18,7 @@ function App() {
     const storedUser = localStorage.getItem("user");
 
     if (token && role && storedUser) {
+      setAuthToken(token);
       setUser({ token, role, user: JSON.parse(storedUser) });
       checkDeclarationStatus(role);
     } else {
@@ -45,6 +46,7 @@ function App() {
     localStorage.setItem("token", token);
     localStorage.setItem("role", role);
     localStorage.setItem("user", JSON.stringify(userData));
+    setAuthToken(token);
     
     setUser({ token, role, user: userData });
     
@@ -60,8 +62,11 @@ function App() {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     localStorage.removeItem("user");
+    setAuthToken(null);
     setUser(null);
     setNeedsDeclaration(false);
+    // Force navigation to home page without requiring refresh
+    window.location.href = "/";
   };
 
   const handleDeclarationComplete = () => {
@@ -84,18 +89,34 @@ function App() {
   return (
     <Routes>
       {/* Public Routes */}
-      <Route path="/" element={!user ? <HomePage /> : <Navigate to="/dashboard" />} />
+      <Route 
+        path="/" 
+        element={
+          !user ? (
+            <HomePage />
+          ) : (
+            <Navigate to="/dashboard" replace />
+          )
+        } 
+      />
+      
       <Route 
         path="/login" 
-        element={!user ? <LoginPage onLogin={handleLogin} /> : <Navigate to="/dashboard" />} 
+        element={
+          !user ? (
+            <LoginPage onLogin={handleLogin} />
+          ) : (
+            <Navigate to="/dashboard" replace />
+          )
+        } 
       />
 
-      {/* Protected Routes */}
+      {/* Protected Dashboard Route */}
       <Route
         path="/dashboard"
         element={
           !user ? (
-            <Navigate to="/login" />
+            <Navigate to="/login" replace />
           ) : needsDeclaration ? (
             <MemberDeclarationForm 
               onComplete={handleDeclarationComplete}
@@ -109,8 +130,8 @@ function App() {
         }
       />
 
-      {/* Catch all */}
-      <Route path="*" element={<Navigate to="/" />} />
+      {/* Catch all - redirect to home */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
@@ -151,5 +172,3 @@ function MemberDashboardWrapper({ onLogout }) {
 
   return <MemberDashboard data={data} onLogout={onLogout} />;
 }
-
-export default App;
