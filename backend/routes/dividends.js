@@ -233,6 +233,8 @@ router.get("/declaration/:id", auth, async (req, res) => {
  * POST /api/admin/dividends/pay/:declarationId
  * Mark dividends as paid for a declaration
  * This credits dividends to member savings
+ * 
+ * ✅ FIX: Removed manual loan_limit update since the database trigger handles it automatically
  */
 router.post("/pay/:declarationId", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") {
@@ -278,18 +280,15 @@ router.post("/pay/:declarationId", auth, async (req, res) => {
     for (const allocation of allocationsRes.rows) {
       const dividendAmount = parseFloat(allocation.dividend_amount);
 
-      // Insert dividend as savings
+      // ✅ FIX: Only insert dividend as savings
+      // The database trigger 'trigger_update_loan_limit' will automatically update loan_limit
       await client.query(`
         INSERT INTO savings (user_id, amount, saved_at, source)
         VALUES ($1, $2, NOW(), $3)
       `, [allocation.user_id, dividendAmount, `Dividend ${declaration.financial_year}`]);
 
-      // Update loan limit (3x savings rule)
-      await client.query(`
-        UPDATE users 
-        SET loan_limit = loan_limit + ($1 * 3)
-        WHERE id = $2
-      `, [dividendAmount, allocation.user_id]);
+      // ❌ REMOVED: Manual loan limit update (was causing 6x multiplier)
+      // The trigger_update_loan_limit trigger already handles this automatically
 
       // Mark allocation as paid
       await client.query(`
