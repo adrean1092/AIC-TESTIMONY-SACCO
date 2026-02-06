@@ -5,9 +5,9 @@ import LoginPage from "./components/LoginPage";
 import MemberDashboard from "./components/MemberDashboard";
 import AdminDashboard from "./components/AdminDashboard";
 import MemberDeclarationForm from "./components/MemberDeclarationForm";
-import API, { setAuthToken } from "./api";
+import API, { setAuthToken } from "./api";  // ← IMPORTANT: Import setAuthToken
 
-export default function App() {
+function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [needsDeclaration, setNeedsDeclaration] = useState(false);
@@ -18,7 +18,7 @@ export default function App() {
     const storedUser = localStorage.getItem("user");
 
     if (token && role && storedUser) {
-      setAuthToken(token);
+      setAuthToken(token);  // ← Set token in API headers on mount
       setUser({ token, role, user: JSON.parse(storedUser) });
       checkDeclarationStatus(role);
     } else {
@@ -46,7 +46,7 @@ export default function App() {
     localStorage.setItem("token", token);
     localStorage.setItem("role", role);
     localStorage.setItem("user", JSON.stringify(userData));
-    setAuthToken(token);
+    setAuthToken(token);  // ← Set token in API headers on login
     
     setUser({ token, role, user: userData });
     
@@ -58,14 +58,21 @@ export default function App() {
     }
   };
 
+  // ✅ FIXED LOGOUT FUNCTION
   const handleLogout = () => {
+    // Clear localStorage
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     localStorage.removeItem("user");
+    
+    // Clear auth token from API headers
     setAuthToken(null);
+    
+    // Clear state
     setUser(null);
     setNeedsDeclaration(false);
-    // Force navigation to home page without requiring refresh
+    
+    // Force navigation to homepage (this is the key!)
     window.location.href = "/";
   };
 
@@ -91,27 +98,14 @@ export default function App() {
       {/* Public Routes */}
       <Route 
         path="/" 
-        element={
-          !user ? (
-            <HomePage />
-          ) : (
-            <Navigate to="/dashboard" replace />
-          )
-        } 
+        element={!user ? <HomePage /> : <Navigate to="/dashboard" replace />} 
       />
-      
       <Route 
         path="/login" 
-        element={
-          !user ? (
-            <LoginPage onLogin={handleLogin} />
-          ) : (
-            <Navigate to="/dashboard" replace />
-          )
-        } 
+        element={!user ? <LoginPage onLogin={handleLogin} /> : <Navigate to="/dashboard" replace />} 
       />
 
-      {/* Protected Dashboard Route */}
+      {/* Protected Routes */}
       <Route
         path="/dashboard"
         element={
@@ -130,7 +124,7 @@ export default function App() {
         }
       />
 
-      {/* Catch all - redirect to home */}
+      {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -172,3 +166,5 @@ function MemberDashboardWrapper({ onLogout }) {
 
   return <MemberDashboard data={data} onLogout={onLogout} />;
 }
+
+export default App;
