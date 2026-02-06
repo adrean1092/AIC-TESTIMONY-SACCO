@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import RequestLoanForm from "./RequestLoanForm";
 import MemberDividends from "./Memberdividends";
-import LoanPaymentSchedule from "./LoanPaymentSchedule";
+import Loanspaymentschedule from "./Loanpaymentschedule";
 import API from "../api";
 
 export default function MemberDashboard({ data, onLogout }) {
@@ -496,7 +496,7 @@ export default function MemberDashboard({ data, onLogout }) {
 
         {/* Payment Schedule Modal */}
         {selectedLoanSchedule && (
-          <LoanPaymentSchedule
+          <Loanpaymentschedule
             principal={selectedLoanSchedule.principal}
             repaymentPeriod={selectedLoanSchedule.repaymentPeriod}
             onClose={() => setSelectedLoanSchedule(null)}
