@@ -86,12 +86,12 @@ router.post("/declare", auth, async (req, res) => {
       });
     }
 
-    // Calculate total eligible savings (sum of all member savings as of year end)
+    // ✅ FIX: Calculate total eligible savings (sum of ALL savings - both MEMBER and ADMIN - as of year end)
     const savingsRes = await client.query(`
       SELECT COALESCE(SUM(s.amount), 0) as total_savings
       FROM savings s
       JOIN users u ON s.user_id = u.id
-      WHERE u.role = 'MEMBER'
+      WHERE u.role IN ('MEMBER', 'ADMIN')
       AND EXTRACT(YEAR FROM s.saved_at) <= $1
     `, [financialYear]);
 
@@ -118,12 +118,12 @@ router.post("/declare", auth, async (req, res) => {
       FROM users u
       LEFT JOIN savings s ON s.user_id = u.id 
         AND EXTRACT(YEAR FROM s.saved_at) <= $1
-      WHERE u.role = 'MEMBER'
+      WHERE u.role IN ('MEMBER', 'ADMIN')
       GROUP BY u.id, u.full_name, u.sacco_number
       HAVING COALESCE(SUM(s.amount), 0) > 0
     `, [financialYear]);
 
-    // Insert dividend allocations for each member
+    // Insert dividend allocations for each user (member or admin)
     for (const member of membersRes.rows) {
       const memberSavings = parseFloat(member.total_savings);
       const dividendAmount = (memberSavings * dividendRate) / 100;

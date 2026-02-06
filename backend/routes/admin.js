@@ -149,7 +149,8 @@ router.delete("/members/:id", auth, async (req, res) => {
   }
 });
 
-// Add savings to member - FIXED: Also updates loan_limit (3x savings)
+// ✅ FIX: Add savings to ANY user (member OR admin) - REMOVED manual loan_limit update
+// The database trigger 'trigger_update_loan_limit' handles this automatically
 router.post("/members/:id/savings", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { id } = req.params;
@@ -160,29 +161,28 @@ router.post("/members/:id/savings", auth, async (req, res) => {
   }
 
   try {
-    const userCheck = await pool.query("SELECT role FROM users WHERE id=$1", [id]);
+    // ✅ FIX: Check user exists (any role - MEMBER or ADMIN)
+    const userCheck = await pool.query("SELECT id, role, full_name FROM users WHERE id=$1", [id]);
     if (userCheck.rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (userCheck.rows[0].role !== "MEMBER") {
-      return res.status(400).json({ message: "Only members can have savings" });
-    }
     
+    const user = userCheck.rows[0];
     const savingsAmount = parseFloat(amount);
     
-    // Insert savings
+    // ✅ FIX: Only insert savings
+    // The database trigger will automatically update loan_limit (3x savings)
     await pool.query(
       "INSERT INTO savings (user_id, amount, saved_at) VALUES ($1, $2, NOW())",
       [id, savingsAmount]
     );
     
-    // Update loan limit (3x savings)
-    await pool.query(
-      "UPDATE users SET loan_limit = loan_limit + $1 WHERE id = $2",
-      [savingsAmount * 3, id]
-    );
+    // ❌ REMOVED: Manual loan limit update (was causing 6x multiplier)
+    // The database trigger handles this automatically
     
-    res.json({ message: "Savings added successfully and loan limit updated" });
+    res.json({ 
+      message: `Savings added successfully for ${user.full_name} (${user.role}) and loan limit updated` 
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -244,16 +244,27 @@ router.put("/loans/:id/approve", auth, async (req, res) => {
     
     const loan = loanRes.rows[0];
     
-    if (loan.status === 'APPROVED') {
+    if (loan.status === "APPROVED") {
       return res.status(400).json({ message: "Loan already approved" });
     }
     
     const principalAmount = parseFloat(loan.principal_amount);
     
-    // Update loan status
+    const memberRes = await pool.query(
+      "SELECT loan_limit FROM users WHERE id=$1",
+      [loan.user_id]
+    );
+    
+    const availableLimit = parseFloat(memberRes.rows[0].loan_limit);
+    
+    if (principalAmount > availableLimit) {
+      return res.status(400).json({ 
+        message: `Insufficient loan limit. Available: ${availableLimit}, Requested: ${principalAmount}` 
+      });
+    }
+    
     await pool.query("UPDATE loans SET status='APPROVED' WHERE id=$1", [id]);
     
-    // Deduct from member's loan limit
     await pool.query(
       "UPDATE users SET loan_limit = loan_limit - $1 WHERE id=$2",
       [principalAmount, loan.user_id]
@@ -272,47 +283,64 @@ router.put("/loans/:id/reject", auth, async (req, res) => {
   const { id } = req.params;
   
   try {
+    const loanRes = await pool.query("SELECT status FROM loans WHERE id=$1", [id]);
+    
+    if (loanRes.rows.length === 0) {
+      return res.status(404).json({ message: "Loan not found" });
+    }
+    
+    if (loanRes.rows[0].status === "APPROVED") {
+      return res.status(400).json({ message: "Cannot reject an approved loan" });
+    }
+    
     await pool.query("UPDATE loans SET status='REJECTED' WHERE id=$1", [id]);
-    res.json({ message: "Loan rejected successfully" });
+    res.json({ message: "Loan rejected" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// Record loan payment - FIXED: Better calculation logic
-// NOTE: Using POST (not PUT) to match frontend API.post() call
+// Record loan payment
 router.post("/loans/:id/payment", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { id } = req.params;
-  const { paymentAmount } = req.body; // Frontend sends "paymentAmount"
+  const { amount: paymentAmount } = req.body;
   
   if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
     return res.status(400).json({ message: "Invalid payment amount" });
   }
-
+  
   try {
-    const loanRes = await pool.query(
-      `SELECT user_id, amount, principal_amount, initial_amount, 
-              COALESCE(principal_paid, 0) as principal_paid, 
-              COALESCE(interest_paid, 0) as interest_paid 
-       FROM loans WHERE id=$1`,
-      [id]
-    );
+    const loanRes = await pool.query(`
+      SELECT 
+        user_id,
+        amount as current_balance,
+        principal_amount,
+        initial_amount,
+        COALESCE(principal_paid, 0) as principal_paid,
+        COALESCE(interest_paid, 0) as interest_paid,
+        interest_rate,
+        repayment_period,
+        status
+      FROM loans 
+      WHERE id=$1
+    `, [id]);
     
     if (loanRes.rows.length === 0) {
       return res.status(404).json({ message: "Loan not found" });
     }
     
     const loan = loanRes.rows[0];
-    const currentBalance = parseFloat(loan.amount);
-    const principalAmount = parseFloat(loan.principal_amount);
-    const initialAmount = parseFloat(loan.initial_amount);
-    const principalPaid = parseFloat(loan.principal_paid);
-    const interestPaid = parseFloat(loan.interest_paid);
     
-    if (currentBalance === 0) {
-      return res.status(400).json({ message: "Loan already fully paid" });
+    if (loan.status !== "APPROVED") {
+      return res.status(400).json({ message: "Can only record payments for approved loans" });
+    }
+    
+    const currentBalance = parseFloat(loan.current_balance);
+    
+    if (currentBalance <= 0) {
+      return res.status(400).json({ message: "Loan is already fully paid" });
     }
     
     if (parseFloat(paymentAmount) > currentBalance) {
@@ -321,10 +349,14 @@ router.post("/loans/:id/payment", auth, async (req, res) => {
       });
     }
     
-    // Calculate interest and principal portions
-    // Total interest = initial amount - principal amount
-    const totalInterest = initialAmount - principalAmount;
-    const remainingInterest = totalInterest - interestPaid;
+    const principalAmount = parseFloat(loan.principal_amount);
+    const principalPaid = parseFloat(loan.principal_paid);
+    const interestPaid = parseFloat(loan.interest_paid);
+    const monthlyRate = parseFloat(loan.interest_rate) / 100;
+    const months = parseInt(loan.repayment_period);
+    
+    const totalInterest = (principalAmount * monthlyRate * months);
+    const remainingInterest = Math.max(0, totalInterest - interestPaid);
     
     // Interest is paid first, then principal
     let interestPortion = Math.min(parseFloat(paymentAmount), remainingInterest);
