@@ -195,4 +195,4 @@ export default function LoanPaymentSchedule({ principal, repaymentPeriod, onClos
       </div>
     </div>
   );
-}|
+}
