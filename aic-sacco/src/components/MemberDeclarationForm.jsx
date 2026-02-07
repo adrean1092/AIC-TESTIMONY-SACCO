@@ -60,7 +60,7 @@ export default function MemberDeclarationForm({ onComplete, memberData }) {
       <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
         {/* Header */}
         <div className="bg-red-700 text-white p-6">
-          <h1 className="text-2xl font-bold text-center">AIC TESTIMONY PASTORS SACCO</h1>
+          <h1 className="text-2xl font-bold text-center">AIC TESTIMONY SACCO</h1>
           <h2 className="text-xl font-semibold text-center mt-2">MEMBER DECLARATION FORM</h2>
           <p className="text-center text-red-100 mt-2">
             Please read and accept the following terms before proceeding
@@ -145,7 +145,7 @@ export default function MemberDeclarationForm({ onComplete, memberData }) {
                 />
                 <span className="text-sm text-gray-800">
                   <strong className="font-semibold">Membership Terms:</strong> I understand and accept all terms 
-                  and conditions of membership in AIC Testimony Pastors SACCO as outlined in the constitution 
+                  and conditions of membership in AIC Testimony SACCO as outlined in the constitution 
                   and by-laws.
                 </span>
               </label>

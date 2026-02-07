@@ -37,7 +37,7 @@ export default function HomePage() {
       {/* Header */}
       <header className="bg-red-700 text-white shadow-lg">
         <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold">AIC TESTIMONY PASTORS SACCO</h1>
+          <h1 className="text-2xl font-bold">AIC TESTIMONY SACCO</h1>
           <button
             onClick={() => navigate("/login")}
             className="bg-white text-red-700 px-6 py-2 rounded-lg font-semibold hover:bg-red-50 transition"

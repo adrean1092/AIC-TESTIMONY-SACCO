@@ -257,7 +257,7 @@ export default function Reports() {
           </div>
 
           <div className="print-only">
-            <h1 style={{textAlign: 'center', color: '#b91c1c'}}>AIC TESTIMONY PASTORS SACCO</h1>
+            <h1 style={{textAlign: 'center', color: '#b91c1c'}}>AIC TESTIMONY SACCO</h1>
             <h2 style={{textAlign: 'center'}}>
               {reportType === "all" ? "All Members Report" : "Individual Member Report"}
             </h2>

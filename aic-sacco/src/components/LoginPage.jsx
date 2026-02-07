@@ -25,7 +25,7 @@ export default function LoginPage({ onLogin }) {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-md bg-white p-8 rounded shadow-lg">
         <h2 className="text-2xl font-bold mb-6 text-primary text-center">
-          AIC TESTIMONY PASTORS SACCO
+          AIC TESTIMONY SACCO
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
