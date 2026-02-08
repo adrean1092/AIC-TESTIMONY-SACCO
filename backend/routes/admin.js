@@ -33,7 +33,7 @@ router.get("/members", auth, async (req, res) => {
   }
 });
 
-// Generate next sacco number
+// Generate next sacco number (fallback if not manually provided)
 async function generateSaccoNumber() {
   try {
     const result = await pool.query(
@@ -53,57 +53,167 @@ async function generateSaccoNumber() {
   }
 }
 
-// Add member or admin
+// ✅ NEW: Add member or admin with optional existing loan and manual SACCO number
 router.post("/members", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   
-  const { full_name, id_number, email, phone, password, role } = req.body;
+  const { 
+    full_name, 
+    id_number, 
+    email, 
+    phone, 
+    password, 
+    role,
+    sacco_number, // ✅ NEW: Manual SACCO number
+    initial_savings, // ✅ NEW: Initial savings amount
+    existing_loan // ✅ NEW: Optional existing loan details
+  } = req.body;
   
   if (!full_name || !id_number || !email || !phone || !password || !role) {
-    return res.status(400).json({ message: "All fields are required" });
+    return res.status(400).json({ message: "All required fields must be provided" });
   }
 
   if (role !== "ADMIN" && role !== "MEMBER") {
     return res.status(400).json({ message: "Role must be either ADMIN or MEMBER" });
   }
 
+  const client = await pool.connect();
+
   try {
-    const existingId = await pool.query("SELECT id FROM users WHERE id_number=$1", [id_number]);
+    await client.query("BEGIN");
+
+    // Check for existing ID number
+    const existingId = await client.query("SELECT id FROM users WHERE id_number=$1", [id_number]);
     if (existingId.rows.length > 0) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ message: "ID number already exists" });
     }
 
-    const existingEmail = await pool.query("SELECT id FROM users WHERE email=$1", [email]);
+    // Check for existing email
+    const existingEmail = await client.query("SELECT id FROM users WHERE email=$1", [email]);
     if (existingEmail.rows.length > 0) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ message: "Email already exists" });
     }
 
-    const hashedPassword = bcrypt.hashSync(password, 10);
-    let newUser;
-    
+    // ✅ NEW: Validate manual SACCO number if provided
+    let finalSaccoNumber = null;
     if (role === "MEMBER") {
-      const saccoNumber = await generateSaccoNumber();
-      newUser = await pool.query(
+      if (sacco_number) {
+        // Check if manual SACCO number already exists
+        const existingSacco = await client.query(
+          "SELECT id FROM users WHERE sacco_number=$1", 
+          [sacco_number]
+        );
+        if (existingSacco.rows.length > 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "SACCO number already exists" });
+        }
+        finalSaccoNumber = sacco_number;
+      } else {
+        // Auto-generate if not provided
+        finalSaccoNumber = await generateSaccoNumber();
+      }
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    
+    // Create user
+    let newUser;
+    if (role === "MEMBER") {
+      newUser = await client.query(
         `INSERT INTO users (full_name, id_number, email, phone, password, role, sacco_number) 
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [full_name, id_number, email, phone, hashedPassword, role, saccoNumber]
+        [full_name, id_number, email, phone, hashedPassword, role, finalSaccoNumber]
       );
     } else {
-      newUser = await pool.query(
+      newUser = await client.query(
         `INSERT INTO users (full_name, id_number, email, phone, password, role) 
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
         [full_name, id_number, email, phone, hashedPassword, role]
       );
     }
+
+    const userId = newUser.rows[0].id;
+
+    // ✅ NEW: Add initial savings if provided
+    if (initial_savings && parseFloat(initial_savings) > 0 && role === "MEMBER") {
+      await client.query(
+        `INSERT INTO savings (user_id, amount, saved_at, source)
+         VALUES ($1, $2, NOW(), $3)`,
+        [userId, parseFloat(initial_savings), 'Initial Deposit']
+      );
+    }
+
+    // ✅ NEW: Add existing loan if provided
+    if (existing_loan && role === "MEMBER") {
+      const {
+        amount,
+        interest_rate,
+        repayment_period,
+        loan_purpose,
+        created_at, // ✅ Custom creation date
+        status // Optional status (defaults to APPROVED for existing loans)
+      } = existing_loan;
+
+      if (!amount || !interest_rate || !repayment_period) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ 
+          message: "Existing loan must have amount, interest_rate, and repayment_period" 
+        });
+      }
+
+      const loanAmount = parseFloat(amount);
+      const loanInterestRate = parseFloat(interest_rate);
+      const processingFee = loanAmount * 0.005; // 0.5%
+      const principalWithFee = loanAmount + processingFee;
+
+      // Calculate interest and monthly payment
+      const monthlyRate = loanInterestRate / 100;
+      const totalInterest = principalWithFee * monthlyRate * repayment_period;
+      const totalPayable = principalWithFee + totalInterest;
+      const monthlyPayment = totalPayable / repayment_period;
+
+      const loanCreatedAt = created_at || new Date().toISOString();
+      const loanStatus = status || 'APPROVED';
+
+      await client.query(
+        `INSERT INTO loans (
+          user_id, amount, initial_amount, principal_amount, 
+          interest_rate, repayment_period, loan_purpose, 
+          processing_fee, monthly_payment, total_interest, 
+          status, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          userId, 
+          loanAmount, // Current balance
+          loanAmount, // Initial amount
+          principalWithFee, // Principal with fee
+          loanInterestRate,
+          repayment_period,
+          loan_purpose || 'Existing loan',
+          processingFee,
+          monthlyPayment,
+          totalInterest,
+          loanStatus,
+          loanCreatedAt
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
     
     delete newUser.rows[0].password;
     res.json({
-      message: `${role} added successfully`,
+      message: `${role} added successfully${initial_savings ? ' with initial savings' : ''}${existing_loan ? ' and existing loan' : ''}`,
       user: newUser.rows[0]
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error(err);
     res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
   }
 });
 
@@ -111,14 +221,33 @@ router.post("/members", auth, async (req, res) => {
 router.put("/members/:id", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { id } = req.params;
-  const { full_name, id_number, email, phone } = req.body;
+  const { full_name, id_number, email, phone, sacco_number } = req.body;
   
   try {
-    const updated = await pool.query(
-      `UPDATE users SET full_name=$1, id_number=$2, email=$3, phone=$4 
-       WHERE id=$5 RETURNING *`,
-      [full_name, id_number, email, phone, id]
-    );
+    // ✅ NEW: Allow updating SACCO number
+    let query, params;
+    
+    if (sacco_number !== undefined) {
+      // Check if new SACCO number already exists (if changing)
+      const existing = await pool.query(
+        "SELECT id FROM users WHERE sacco_number=$1 AND id!=$2",
+        [sacco_number, id]
+      );
+      
+      if (existing.rows.length > 0) {
+        return res.status(400).json({ message: "SACCO number already in use" });
+      }
+      
+      query = `UPDATE users SET full_name=$1, id_number=$2, email=$3, phone=$4, sacco_number=$5 
+               WHERE id=$6 RETURNING *`;
+      params = [full_name, id_number, email, phone, sacco_number, id];
+    } else {
+      query = `UPDATE users SET full_name=$1, id_number=$2, email=$3, phone=$4 
+               WHERE id=$5 RETURNING *`;
+      params = [full_name, id_number, email, phone, id];
+    }
+    
+    const updated = await pool.query(query, params);
     
     if (updated.rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
@@ -150,8 +279,7 @@ router.delete("/members/:id", auth, async (req, res) => {
   }
 });
 
-// ✅ FIX: Add savings to ANY user (member OR admin) - REMOVED manual loan_limit update
-// The database trigger 'trigger_update_loan_limit' handles this automatically
+// ✅ FIX: Add savings to ANY user (member OR admin)
 router.post("/members/:id/savings", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { id } = req.params;
@@ -162,7 +290,6 @@ router.post("/members/:id/savings", auth, async (req, res) => {
   }
 
   try {
-    // ✅ FIX: Check user exists (any role - MEMBER or ADMIN)
     const userCheck = await pool.query("SELECT id, role, full_name FROM users WHERE id=$1", [id]);
     if (userCheck.rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
@@ -171,15 +298,10 @@ router.post("/members/:id/savings", auth, async (req, res) => {
     const user = userCheck.rows[0];
     const savingsAmount = parseFloat(amount);
     
-    // ✅ FIX: Only insert savings
-    // The database trigger will automatically update loan_limit (3x savings)
     await pool.query(
       "INSERT INTO savings (user_id, amount, saved_at) VALUES ($1, $2, NOW())",
       [id, savingsAmount]
     );
-    
-    // ❌ REMOVED: Manual loan limit update (was causing 6x multiplier)
-    // The database trigger handles this automatically
     
     res.json({ 
       message: `Savings added successfully for ${user.full_name} (${user.role}) and loan limit updated` 
@@ -192,7 +314,7 @@ router.post("/members/:id/savings", auth, async (req, res) => {
 
 // ======== LOANS MANAGEMENT ========
 
-// Get all loans - FIXED: Now returns DISTINCT loans with first guarantor only
+// Get all loans
 router.get("/loans", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   
@@ -228,50 +350,93 @@ router.get("/loans", auth, async (req, res) => {
   }
 });
 
+// ✅ NEW: Update loan details (including creation date)
+router.put("/loans/:id", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+  
+  const { id } = req.params;
+  const {
+    amount,
+    interest_rate,
+    repayment_period,
+    loan_purpose,
+    created_at, // ✅ NEW: Allow editing creation date
+    status
+  } = req.body;
+
+  try {
+    // Get current loan
+    const currentLoan = await pool.query("SELECT * FROM loans WHERE id=$1", [id]);
+    if (currentLoan.rows.length === 0) {
+      return res.status(404).json({ message: "Loan not found" });
+    }
+
+    const loan = currentLoan.rows[0];
+    
+    // Use provided values or keep existing
+    const newAmount = amount !== undefined ? parseFloat(amount) : parseFloat(loan.amount);
+    const newRate = interest_rate !== undefined ? parseFloat(interest_rate) : parseFloat(loan.interest_rate);
+    const newPeriod = repayment_period !== undefined ? parseInt(repayment_period) : loan.repayment_period;
+    const newPurpose = loan_purpose !== undefined ? loan_purpose : loan.loan_purpose;
+    const newCreatedAt = created_at || loan.created_at;
+    const newStatus = status || loan.status;
+
+    // Recalculate loan values
+    const processingFee = newAmount * 0.005;
+    const principalWithFee = newAmount + processingFee;
+    const monthlyRate = newRate / 100;
+    const totalInterest = principalWithFee * monthlyRate * newPeriod;
+    const totalPayable = principalWithFee + totalInterest;
+    const monthlyPayment = totalPayable / newPeriod;
+
+    await pool.query(
+      `UPDATE loans SET 
+        amount = $1,
+        initial_amount = $2,
+        principal_amount = $3,
+        interest_rate = $4,
+        repayment_period = $5,
+        loan_purpose = $6,
+        processing_fee = $7,
+        monthly_payment = $8,
+        total_interest = $9,
+        status = $10,
+        created_at = $11
+       WHERE id = $12`,
+      [
+        newAmount,
+        newAmount, // initial_amount same as current amount
+        principalWithFee,
+        newRate,
+        newPeriod,
+        newPurpose,
+        processingFee,
+        monthlyPayment,
+        totalInterest,
+        newStatus,
+        newCreatedAt,
+        id
+      ]
+    );
+
+    res.json({ 
+      success: true,
+      message: "Loan updated successfully" 
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Approve loan
-router.put("/loans/:id/approve", auth, async (req, res) => {
+router.post("/loans/:id/approve", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { id } = req.params;
   
   try {
-    const loanRes = await pool.query(
-      "SELECT user_id, principal_amount, status FROM loans WHERE id=$1",
-      [id]
-    );
-    
-    if (loanRes.rows.length === 0) {
-      return res.status(404).json({ message: "Loan not found" });
-    }
-    
-    const loan = loanRes.rows[0];
-    
-    if (loan.status === "APPROVED") {
-      return res.status(400).json({ message: "Loan already approved" });
-    }
-    
-    const principalAmount = parseFloat(loan.principal_amount);
-    
-    const memberRes = await pool.query(
-      "SELECT loan_limit FROM users WHERE id=$1",
-      [loan.user_id]
-    );
-    
-    const availableLimit = parseFloat(memberRes.rows[0].loan_limit);
-    
-    if (principalAmount > availableLimit) {
-      return res.status(400).json({ 
-        message: `Insufficient loan limit. Available: ${availableLimit}, Requested: ${principalAmount}` 
-      });
-    }
-    
     await pool.query("UPDATE loans SET status='APPROVED' WHERE id=$1", [id]);
-    
-    await pool.query(
-      "UPDATE users SET loan_limit = loan_limit - $1 WHERE id=$2",
-      [principalAmount, loan.user_id]
-    );
-    
-    res.json({ message: "Loan approved successfully" });
+    res.json({ success: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -279,127 +444,96 @@ router.put("/loans/:id/approve", auth, async (req, res) => {
 });
 
 // Reject loan
-router.put("/loans/:id/reject", auth, async (req, res) => {
+router.post("/loans/:id/reject", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { id } = req.params;
   
   try {
-    const loanRes = await pool.query("SELECT status FROM loans WHERE id=$1", [id]);
-    
-    if (loanRes.rows.length === 0) {
-      return res.status(404).json({ message: "Loan not found" });
-    }
-    
-    if (loanRes.rows[0].status === "APPROVED") {
-      return res.status(400).json({ message: "Cannot reject an approved loan" });
-    }
-    
     await pool.query("UPDATE loans SET status='REJECTED' WHERE id=$1", [id]);
-    res.json({ message: "Loan rejected" });
+    res.json({ success: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// Record loan payment
-router.post("/loans/:id/payment", auth, async (req, res) => {
+// Record loan repayment
+router.post("/loans/:id/repayment", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+  
   const { id } = req.params;
-  const { amount: paymentAmount } = req.body;
+  const { amount } = req.body;
   
-  if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
-    return res.status(400).json({ message: "Invalid payment amount" });
+  if (!amount || parseFloat(amount) <= 0) {
+    return res.status(400).json({ message: "Invalid repayment amount" });
   }
-  
+
+  const client = await pool.connect();
+
   try {
-    const loanRes = await pool.query(`
-      SELECT 
-        user_id,
-        amount as current_balance,
-        principal_amount,
-        initial_amount,
-        COALESCE(principal_paid, 0) as principal_paid,
-        COALESCE(interest_paid, 0) as interest_paid,
-        interest_rate,
-        repayment_period,
-        status
-      FROM loans 
-      WHERE id=$1
-    `, [id]);
-    
+    await client.query("BEGIN");
+
+    const loanRes = await client.query("SELECT * FROM loans WHERE id=$1", [id]);
     if (loanRes.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ message: "Loan not found" });
     }
-    
+
     const loan = loanRes.rows[0];
-    
-    if (loan.status !== "APPROVED") {
-      return res.status(400).json({ message: "Can only record payments for approved loans" });
-    }
-    
-    const currentBalance = parseFloat(loan.current_balance);
-    
-    if (currentBalance <= 0) {
-      return res.status(400).json({ message: "Loan is already fully paid" });
-    }
-    
-    if (parseFloat(paymentAmount) > currentBalance) {
-      return res.status(400).json({ 
-        message: `Payment amount (${paymentAmount}) exceeds remaining balance (${currentBalance})` 
-      });
-    }
-    
-    const principalAmount = parseFloat(loan.principal_amount);
-    const principalPaid = parseFloat(loan.principal_paid);
-    const interestPaid = parseFloat(loan.interest_paid);
+    const repaymentAmount = parseFloat(amount);
+    const currentBalance = parseFloat(loan.amount);
+    const principalAmount = parseFloat(loan.principal_amount || loan.initial_amount);
+    const currentPrincipalPaid = parseFloat(loan.principal_paid || 0);
+    const currentInterestPaid = parseFloat(loan.interest_paid || 0);
     const monthlyRate = parseFloat(loan.interest_rate) / 100;
-    const months = parseInt(loan.repayment_period);
-    
-    const totalInterest = (principalAmount * monthlyRate * months);
-    const remainingInterest = Math.max(0, totalInterest - interestPaid);
-    
-    // Interest is paid first, then principal
-    let interestPortion = Math.min(parseFloat(paymentAmount), remainingInterest);
-    let principalPortion = parseFloat(paymentAmount) - interestPortion;
-    
-    const newBalance = Math.max(0, currentBalance - parseFloat(paymentAmount));
-    const newPrincipalPaid = principalPaid + principalPortion;
-    const newInterestPaid = interestPaid + interestPortion;
-    
-    // Update loan with new values
-    await pool.query(
+
+    const currentPrincipalBalance = principalAmount - currentPrincipalPaid;
+    const interestPayment = currentPrincipalBalance * monthlyRate;
+    const principalPayment = Math.max(0, repaymentAmount - interestPayment);
+
+    const newPrincipalPaid = currentPrincipalPaid + principalPayment;
+    const newInterestPaid = currentInterestPaid + Math.min(repaymentAmount, interestPayment);
+    const newBalance = Math.max(0, currentBalance - repaymentAmount);
+
+    await client.query(
       `UPDATE loans 
-       SET amount=$1, principal_paid=$2, interest_paid=$3 
-       WHERE id=$4`,
-      [newBalance, newPrincipalPaid, newInterestPaid, id]
+       SET amount=$1, principal_paid=$2, interest_paid=$3, status=$4
+       WHERE id=$5`,
+      [
+        newBalance,
+        newPrincipalPaid,
+        newInterestPaid,
+        newBalance === 0 ? 'PAID' : 'APPROVED',
+        id
+      ]
     );
-    
-    // Restore loan limit for principal portion only
-    if (principalPortion > 0) {
-      await pool.query(
-        "UPDATE users SET loan_limit = loan_limit + $1 WHERE id=$2",
-        [principalPortion, loan.user_id]
-      );
-    }
-    
-    // Get updated loan limit
-    const memberRes = await pool.query(
-      "SELECT loan_limit FROM users WHERE id=$1",
-      [loan.user_id]
+
+    await client.query(
+      `INSERT INTO loan_repayments (loan_id, amount, principal_paid, interest_paid)
+       VALUES ($1, $2, $3, $4)`,
+      [id, repaymentAmount, principalPayment, Math.min(repaymentAmount, interestPayment)]
     );
-    
-    const newLoanLimit = parseFloat(memberRes.rows[0].loan_limit);
-    
-    res.json({ 
-      message: "Payment recorded successfully", 
-      remaining: parseFloat(newBalance.toFixed(2)),
-      paid: parseFloat(paymentAmount),
-      breakdown: {
-        interestPaid: parseFloat(interestPortion.toFixed(2)),
-        principalPaid: parseFloat(principalPortion.toFixed(2))
-      },
-      totals: {
+
+    const userRes = await client.query("SELECT loan_limit FROM users WHERE id=$1", [loan.user_id]);
+    const currentLoanLimit = parseFloat(userRes.rows[0].loan_limit || 0);
+    const newLoanLimit = currentLoanLimit + repaymentAmount;
+
+    await client.query(
+      "UPDATE users SET loan_limit=$1 WHERE id=$2",
+      [newLoanLimit, loan.user_id]
+    );
+
+    await client.query("COMMIT");
+
+    const totalInterest = principalAmount * monthlyRate * loan.repayment_period;
+
+    res.json({
+      success: true,
+      repayment: {
+        amount: parseFloat(repaymentAmount.toFixed(2)),
+        principalPayment: parseFloat(principalPayment.toFixed(2)),
+        interestPayment: parseFloat(Math.min(repaymentAmount, interestPayment).toFixed(2)),
+        newBalance: parseFloat(newBalance.toFixed(2)),
         totalInterestPaid: parseFloat(newInterestPaid.toFixed(2)),
         totalPrincipalPaid: parseFloat(newPrincipalPaid.toFixed(2)),
         totalInterest: parseFloat(totalInterest.toFixed(2)),
@@ -409,14 +543,16 @@ router.post("/loans/:id/payment", auth, async (req, res) => {
       fullyPaid: newBalance === 0
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error(err);
     res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
   }
 });
 
-// ======== REPORTS ========
+// ======== REPORTS (Keep existing implementation) ========
 
-// Get individual member report
 router.get("/reports/member/:id", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { id } = req.params;
@@ -434,6 +570,12 @@ router.get("/reports/member/:id", auth, async (req, res) => {
     
     const member = memberRes.rows[0];
     
+    const totalSavingsRes = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) AS total 
+       FROM savings WHERE user_id=$1`,
+      [id]
+    );
+    
     let dateFilter = "";
     let params = [id];
     
@@ -445,7 +587,7 @@ router.get("/reports/member/:id", auth, async (req, res) => {
       params.push(parseInt(year));
     }
     
-    const savingsRes = await pool.query(
+    const periodSavingsRes = await pool.query(
       `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count 
        FROM savings WHERE user_id=$1 ${dateFilter}`,
       params
@@ -471,9 +613,21 @@ router.get("/reports/member/:id", auth, async (req, res) => {
     );
     
     const savingsHistoryRes = await pool.query(
-      `SELECT amount, saved_at FROM savings WHERE user_id=$1 ${dateFilter} ORDER BY saved_at DESC`,
+      `SELECT amount, saved_at, source FROM savings WHERE user_id=$1 ${dateFilter} ORDER BY saved_at DESC`,
       params
     );
+    
+    const outstandingLoansRes = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) as total_outstanding 
+       FROM loans 
+       WHERE user_id=$1 AND status='APPROVED' AND amount > 0`,
+      [id]
+    );
+    
+    const totalSavings = parseFloat(totalSavingsRes.rows[0].total);
+    const loanLimit = parseFloat(member.loan_limit);
+    const outstandingLoans = parseFloat(outstandingLoansRes.rows[0].total_outstanding);
+    const availableLoanLimit = Math.max(0, loanLimit - outstandingLoans);
     
     res.json({
       member: {
@@ -482,12 +636,16 @@ router.get("/reports/member/:id", auth, async (req, res) => {
         saccoNumber: member.sacco_number,
         email: member.email,
         phone: member.phone,
-        loanLimit: parseFloat(member.loan_limit)
+        loanLimit: loanLimit,
+        totalSavings: totalSavings,
+        outstandingLoans: outstandingLoans,
+        availableLoanLimit: availableLoanLimit
       },
       period: { month, year },
       summary: {
-        totalSavings: parseFloat(savingsRes.rows[0].total),
-        savingsCount: parseInt(savingsRes.rows[0].count),
+        totalSavings: totalSavings,
+        periodSavings: parseFloat(periodSavingsRes.rows[0].total),
+        savingsCount: parseInt(periodSavingsRes.rows[0].count),
         totalLoans: loansRes.rows.length,
         activeLoans: loansRes.rows.filter(l => l.status === 'APPROVED' && l.amount > 0).length
       },
@@ -504,7 +662,8 @@ router.get("/reports/member/:id", auth, async (req, res) => {
       })),
       savingsHistory: savingsHistoryRes.rows.map(s => ({
         amount: parseFloat(s.amount),
-        savedAt: s.saved_at
+        savedAt: s.saved_at,
+        source: s.source || 'Savings Deposit'
       }))
     });
   } catch (err) {
@@ -513,34 +672,26 @@ router.get("/reports/member/:id", auth, async (req, res) => {
   }
 });
 
-// Get all members report
 router.get("/reports/all", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
   const { month, year } = req.query;
   
   try {
-    let savingsDateFilter = "";
     let loansDateFilter = "";
-    let savingsParams = [];
     let loansParams = [];
     
     if (month && year) {
-      savingsDateFilter = "WHERE EXTRACT(MONTH FROM saved_at) = $1 AND EXTRACT(YEAR FROM saved_at) = $2";
       loansDateFilter = "WHERE EXTRACT(MONTH FROM created_at) = $1 AND EXTRACT(YEAR FROM created_at) = $2";
-      savingsParams = [parseInt(month), parseInt(year)];
       loansParams = [parseInt(month), parseInt(year)];
     } else if (year) {
-      savingsDateFilter = "WHERE EXTRACT(YEAR FROM saved_at) = $1";
       loansDateFilter = "WHERE EXTRACT(YEAR FROM created_at) = $1";
-      savingsParams = [parseInt(year)];
       loansParams = [parseInt(year)];
     }
     
     const membersRes = await pool.query("SELECT COUNT(*) FROM users WHERE role='MEMBER'");
     
-    const savingsRes = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0) AS total FROM savings ${savingsDateFilter}`,
-      savingsParams
+    const totalSavingsRes = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM savings`
     );
     
     const loansRes = await pool.query(
@@ -560,7 +711,8 @@ router.get("/reports/all", auth, async (req, res) => {
         u.sacco_number,
         u.loan_limit,
         COALESCE(SUM(s.amount), 0) AS total_savings,
-        COUNT(DISTINCT l.id) AS total_loans
+        COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'APPROVED') AS total_approved_loans,
+        COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'APPROVED' AND l.amount > 0), 0) AS outstanding_loans
       FROM users u
       LEFT JOIN savings s ON s.user_id = u.id
       LEFT JOIN loans l ON l.user_id = u.id
@@ -573,19 +725,28 @@ router.get("/reports/all", auth, async (req, res) => {
       period: { month, year },
       summary: {
         totalMembers: parseInt(membersRes.rows[0].count),
-        totalSavings: parseFloat(savingsRes.rows[0].total),
+        totalSavings: parseFloat(totalSavingsRes.rows[0].total),
         totalLoans: parseFloat(loansRes.rows[0].total),
         loansCount: parseInt(loansRes.rows[0].count),
         activeLoans: parseInt(activeLoansRes.rows[0].count)
       },
-      members: memberBreakdownRes.rows.map(m => ({
-        id: m.id,
-        name: m.full_name,
-        saccoNumber: m.sacco_number,
-        loanLimit: parseFloat(m.loan_limit),
-        totalSavings: parseFloat(m.total_savings),
-        totalLoans: parseInt(m.total_loans)
-      }))
+      members: memberBreakdownRes.rows.map(m => {
+        const totalSavings = parseFloat(m.total_savings);
+        const loanLimit = parseFloat(m.loan_limit);
+        const outstandingLoans = parseFloat(m.outstanding_loans);
+        const availableLoanLimit = Math.max(0, loanLimit - outstandingLoans);
+        
+        return {
+          id: m.id,
+          name: m.full_name,
+          saccoNumber: m.sacco_number,
+          loanLimit: loanLimit,
+          totalSavings: totalSavings,
+          totalLoans: parseInt(m.total_approved_loans),
+          outstandingLoans: outstandingLoans,
+          availableLoanLimit: availableLoanLimit
+        };
+      })
     });
   } catch (err) {
     console.error(err);
