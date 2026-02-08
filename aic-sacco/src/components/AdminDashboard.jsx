@@ -28,7 +28,8 @@ const AdminDashboard = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     localStorage.removeItem("user");
-    navigate("/");
+    // ✅ FIX: Use window.location.href to properly redirect to home page
+    window.location.href = "/";
   };
 
   const loadMembers = async () => {
@@ -207,70 +208,69 @@ const AdminDashboard = () => {
         <>
           {/* Add Member Form */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Add New User</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <input 
-                type="text" 
-                placeholder="Full Name" 
-                className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.full_name} 
-                onChange={e => setNewMember({...newMember, full_name: e.target.value})} 
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Add New Member or Admin</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <input
+                placeholder="Full Name"
+                className="border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
+                value={newMember.full_name}
+                onChange={(e) => setNewMember({ ...newMember, full_name: e.target.value })}
               />
-              <input 
-                type="text" 
-                placeholder="ID Number" 
-                className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.id_number} 
-                onChange={e => setNewMember({...newMember, id_number: e.target.value})} 
+              <input
+                placeholder="ID Number"
+                className="border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
+                value={newMember.id_number}
+                onChange={(e) => setNewMember({ ...newMember, id_number: e.target.value })}
               />
-              <input 
-                type="email" 
-                placeholder="Email" 
-                className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.email} 
-                onChange={e => setNewMember({...newMember, email: e.target.value})} 
+              <input
+                placeholder="Email"
+                type="email"
+                className="border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
+                value={newMember.email}
+                onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
               />
-              <input 
-                type="text" 
-                placeholder="Phone" 
-                className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.phone} 
-                onChange={e => setNewMember({...newMember, phone: e.target.value})} 
+              <input
+                placeholder="Phone"
+                className="border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
+                value={newMember.phone}
+                onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })}
               />
-              <input 
-                type="password" 
-                placeholder="Password" 
-                className="border border-gray-300 p-3 rounded-lg"
-                value={newMember.password} 
-                onChange={e => setNewMember({...newMember, password: e.target.value})} 
+              <input
+                placeholder="Password"
+                type="password"
+                className="border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
+                value={newMember.password}
+                onChange={(e) => setNewMember({ ...newMember, password: e.target.value })}
               />
               <select
-                className="border border-gray-300 p-3 rounded-lg bg-white"
                 value={newMember.role}
-                onChange={e => setNewMember({...newMember, role: e.target.value})}
+                onChange={(e) => setNewMember({ ...newMember, role: e.target.value })}
+                className="border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
               >
                 <option value="MEMBER">Member</option>
                 <option value="ADMIN">Admin</option>
               </select>
-              <button 
-                onClick={addMember} 
-                className="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition font-semibold"
-              >
-                Add {newMember.role === "ADMIN" ? "Admin" : "Member"}
-              </button>
             </div>
+            <button
+              onClick={addMember}
+              className="mt-4 bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition font-semibold"
+            >
+              Add {newMember.role === "ADMIN" ? "Admin" : "Member"}
+            </button>
           </div>
 
           {/* Members Table */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Users List</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Members List</h2>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className="bg-green-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Member</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">SACCO #</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Role</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Contact</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Email</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Phone</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Savings</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Loan Limit</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Add Savings</th>
@@ -278,31 +278,24 @@ const AdminDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {members.map(m => (
-                    <tr key={m.id} className="hover:bg-gray-50">
+                  {members.map((m, idx) => (
+                    <tr key={`member-${idx}`} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-900">{m.full_name}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{m.sacco_number || "N/A"}</td>
                       <td className="px-4 py-3 text-sm">
-                        <div className="font-semibold text-gray-900">{m.full_name}</div>
-                        <div className="text-xs text-gray-500">ID: {m.id_number}</div>
-                        <div className="text-xs text-gray-500">SACCO: {m.sacco_number}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          m.role === 'ADMIN' 
-                            ? 'bg-purple-100 text-purple-800' 
-                            : 'bg-blue-100 text-blue-800'
+                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                          m.role === 'ADMIN' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
                         }`}>
                           {m.role}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm">
-                        <div className="text-gray-900">{m.email}</div>
-                        <div className="text-xs text-gray-500">{m.phone}</div>
-                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{m.email}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{m.phone}</td>
                       <td className="px-4 py-3 text-sm font-semibold text-green-600">
-                        KES {m.savings?.toLocaleString() || 0}
+                        KES {parseFloat(m.savings || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold text-blue-600">
-                        KES {m.loan_limit?.toLocaleString() || 0}
+                        KES {parseFloat(m.loan_limit || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex gap-1">
@@ -347,26 +340,30 @@ const AdminDashboard = () => {
           {/* Edit Member Modal */}
           {editMember && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white p-8 rounded-lg shadow-xl max-w-md w-full">
-                <h2 className="text-2xl font-bold text-gray-800 mb-6">Edit Member</h2>
-                <div className="space-y-4">
-                  <input 
-                    type="text" 
-                    placeholder="Full Name" 
+              <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+                <h3 className="text-xl font-bold text-gray-800 mb-4">Edit Member</h3>
+                <div className="space-y-3">
+                  <input
+                    placeholder="Full Name"
                     className="w-full border border-gray-300 p-3 rounded-lg"
                     value={editMember.full_name}
                     onChange={(e) => setEditMember({...editMember, full_name: e.target.value})}
                   />
-                  <input 
-                    type="email" 
-                    placeholder="Email" 
+                  <input
+                    placeholder="ID Number"
+                    className="w-full border border-gray-300 p-3 rounded-lg"
+                    value={editMember.id_number}
+                    onChange={(e) => setEditMember({...editMember, id_number: e.target.value})}
+                  />
+                  <input
+                    placeholder="Email"
+                    type="email"
                     className="w-full border border-gray-300 p-3 rounded-lg"
                     value={editMember.email}
                     onChange={(e) => setEditMember({...editMember, email: e.target.value})}
                   />
-                  <input 
-                    type="text" 
-                    placeholder="Phone" 
+                  <input
+                    placeholder="Phone"
                     className="w-full border border-gray-300 p-3 rounded-lg"
                     value={editMember.phone}
                     onChange={(e) => setEditMember({...editMember, phone: e.target.value})}

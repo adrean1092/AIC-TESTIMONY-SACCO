@@ -27,6 +27,15 @@ export default function MemberDashboard({ data, onLogout }) {
   const availableLoanLimit = data?.availableLoanLimit || data?.member?.availableLoanLimit || data?.availableLimit || 0;
   const outstandingLoans = data?.outstandingLoans || data?.member?.outstandingLoans || data?.outstanding || 0;
 
+  // ✅ FIX: Properly handle logout with redirect to home page
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("user");
+    // Use window.location.href to properly redirect to home page
+    window.location.href = "/";
+  };
+
   const handleRequestLoan = async (loanData) => {
     try {
       const res = await API.post("/loans", loanData);
@@ -93,7 +102,7 @@ export default function MemberDashboard({ data, onLogout }) {
           <h1 className="text-2xl font-bold">Member Dashboard</h1>
           <button
             className="bg-white text-red-700 px-4 py-2 rounded-lg font-semibold hover:bg-red-50 transition"
-            onClick={onLogout}
+            onClick={handleLogout}
           >
             Logout
           </button>
@@ -176,93 +185,67 @@ export default function MemberDashboard({ data, onLogout }) {
 
                 return (
                   <div key={loan.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                    <div className="flex justify-between items-start mb-3">
                       <div>
-                        <p className="text-sm text-gray-600">Total Balance</p>
-                        <p className="text-xl font-bold text-red-600">
-                          KES {loan.amount.toLocaleString()}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-600">Original Amount</p>
-                        <p className="text-lg font-semibold text-gray-800">
+                        <p className="text-lg font-bold text-gray-900">
                           KES {loan.initialAmount.toLocaleString()}
                         </p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-600">Interest Rate</p>
-                        <p className="text-lg font-semibold text-gray-800">
-                          {loan.interestRate}% p.a.
+                        <p className="text-sm text-gray-500">
+                          Requested: {new Date(loan.createdAt).toLocaleDateString()}
                         </p>
                       </div>
+                      <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded">
+                        ACTIVE
+                      </span>
                     </div>
 
                     {/* Progress Bar */}
-                    <div className="mb-4">
+                    <div className="mb-3">
                       <div className="flex justify-between text-xs text-gray-600 mb-1">
-                        <span>Payment Progress</span>
+                        <span>Repayment Progress</span>
                         <span>{progress.toFixed(1)}%</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
-                          className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${Math.min(progress, 100)}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>Paid: KES {(loan.principalPaid + loan.interestPaid).toLocaleString()}</span>
-                        <span>Remaining: KES {loan.amount.toLocaleString()}</span>
+                          className="bg-green-600 h-2 rounded-full transition-all"
+                          style={{ width: `${progress}%` }}
+                        ></div>
                       </div>
                     </div>
 
-                    {/* Payment Breakdown */}
-                    <div className="bg-gray-50 rounded-lg p-3 mb-3">
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-gray-600 text-xs">Principal Balance</p>
-                          <p className="font-semibold text-blue-700">
-                            KES {remainingPrincipal.toLocaleString()}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-600 text-xs">Interest Balance</p>
-                          <p className="font-semibold text-red-600">
-                            KES {remainingInterest.toLocaleString()}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-600 text-xs">Principal Paid</p>
-                          <p className="font-semibold text-green-600">
-                            KES {loan.principalPaid.toLocaleString()}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-600 text-xs">Interest Paid</p>
-                          <p className="font-semibold text-orange-600">
-                            KES {loan.interestPaid.toLocaleString()}
-                          </p>
-                        </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+                      <div className="bg-gray-50 p-2 rounded">
+                        <p className="text-xs text-gray-600">Current Balance</p>
+                        <p className="font-semibold text-red-600">
+                          KES {loan.amount.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="bg-blue-50 p-2 rounded">
+                        <p className="text-xs text-gray-600">Principal Paid</p>
+                        <p className="font-semibold text-blue-700">
+                          KES {loan.principalPaid.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="bg-orange-50 p-2 rounded">
+                        <p className="text-xs text-gray-600">Interest Paid</p>
+                        <p className="font-semibold text-orange-700">
+                          KES {loan.interestPaid.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="bg-purple-50 p-2 rounded">
+                        <p className="text-xs text-gray-600">Remaining</p>
+                        <p className="font-semibold text-purple-700">
+                          KES {(remainingPrincipal + remainingInterest).toLocaleString()}
+                        </p>
                       </div>
                     </div>
 
-                    {/* Action Buttons */}
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleViewSchedule(loan)}
-                        className="flex-1 bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 transition font-semibold text-sm"
-                      >
-                        📊 View Payment Schedule
-                      </button>
-                      {loan.loanPurpose && (
-                        <button
-                          onClick={() => alert(`Purpose: ${loan.loanPurpose}`)}
-                          className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition text-sm"
-                          title="View loan purpose"
-                        >
-                          ℹ️
-                        </button>
-                      )}
-                    </div>
+                    <button
+                      onClick={() => handleViewSchedule(loan)}
+                      className="w-full bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 transition font-semibold text-sm"
+                    >
+                      📊 View Payment Schedule
+                    </button>
                   </div>
                 );
               })}
@@ -270,69 +253,60 @@ export default function MemberDashboard({ data, onLogout }) {
           </div>
         )}
 
-        {/* Request Loan Form Modal */}
+        {/* Loan Request Form Modal */}
         {showLoanForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl m-4 max-h-[95vh] overflow-y-auto">
-              <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-gray-800">Request a Loan</h2>
-                <button
-                  onClick={() => setShowLoanForm(false)}
-                  className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="p-6">
-                <RequestLoanForm 
-                  onSubmit={handleRequestLoan}
-                  onCancel={() => setShowLoanForm(false)}
-                  availableLoanLimit={availableLoanLimit}
-                  totalLoanLimit={totalLoanLimit}
-                  outstandingLoans={outstandingLoans}
-                />
-              </div>
-            </div>
-          </div>
+          <RequestLoanForm
+            availableLimit={availableLoanLimit}
+            onClose={() => setShowLoanForm(false)}
+            onSubmit={handleRequestLoan}
+          />
         )}
 
-        {/* Change Password Modal */}
+        {/* Password Change Modal */}
         {showPasswordForm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-xl w-full max-w-md m-4">
-              <div className="bg-red-700 text-white px-6 py-4 rounded-t-lg">
-                <h2 className="text-xl font-bold">Change Password</h2>
+              <div className="px-6 py-4 border-b">
+                <h2 className="text-2xl font-bold text-gray-800">Change Password</h2>
               </div>
               <form onSubmit={handleChangePassword} className="p-6">
-                <div>
-                  <label className="block text-gray-700 mb-2 font-semibold">Current Password</label>
-                  <input
-                    type="password"
-                    value={passwordData.currentPassword}
-                    onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    required
-                  />
-                </div>
-                <div className="mt-4">
-                  <label className="block text-gray-700 mb-2 font-semibold">New Password</label>
-                  <input
-                    type="password"
-                    value={passwordData.newPassword}
-                    onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    required
-                  />
-                </div>
-                <div className="mt-4">
-                  <label className="block text-gray-700 mb-2 font-semibold">Confirm New Password</label>
-                  <input
-                    type="password"
-                    value={passwordData.confirmPassword}
-                    onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    required
-                  />
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Current Password
+                    </label>
+                    <input
+                      type="password"
+                      value={passwordData.currentPassword}
+                      onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
+                      className="w-full border border-gray-300 p-3 rounded-lg"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      New Password
+                    </label>
+                    <input
+                      type="password"
+                      value={passwordData.newPassword}
+                      onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
+                      className="w-full border border-gray-300 p-3 rounded-lg"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type="password"
+                      value={passwordData.confirmPassword}
+                      onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
+                      className="w-full border border-gray-300 p-3 rounded-lg"
+                      required
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-3 mt-6">
                   <button
@@ -375,6 +349,7 @@ export default function MemberDashboard({ data, onLogout }) {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
                         <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
                       </tr>
                     </thead>
@@ -382,6 +357,7 @@ export default function MemberDashboard({ data, onLogout }) {
                       {savingsHistory.map((saving) => (
                         <tr key={saving.id}>
                           <td className="px-4 py-3 text-sm">{new Date(saving.savedAt).toLocaleDateString()}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{saving.source || 'Savings Deposit'}</td>
                           <td className="px-4 py-3 text-sm text-right font-semibold text-green-600">
                             KES {saving.amount.toLocaleString()}
                           </td>
@@ -496,7 +472,7 @@ export default function MemberDashboard({ data, onLogout }) {
 
         {/* Payment Schedule Modal */}
         {selectedLoanSchedule && (
-          <Loanpaymentschedule
+          <Loanspaymentschedule
             principal={selectedLoanSchedule.principal}
             repaymentPeriod={selectedLoanSchedule.repaymentPeriod}
             onClose={() => setSelectedLoanSchedule(null)}

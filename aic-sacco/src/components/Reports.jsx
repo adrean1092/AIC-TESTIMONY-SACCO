@@ -97,18 +97,22 @@ export default function Reports() {
     let csvContent = "";
     
     if (reportType === "all") {
-      // CSV Headers for All Members Report
-      csvContent = "SACCO Number,Name,Total Savings,Total Loans,Loan Limit\n";
+      // ✅ UPDATED CSV Headers for All Members Report
+      csvContent = "SACCO Number,Name,Total Savings,Loan Limit,Outstanding Loans,Available Loan Limit,Total Loans\n";
       
       reportData.members.forEach(member => {
-        csvContent += `${member.saccoNumber},${member.name},${member.totalSavings},${member.totalLoans},${member.loanLimit}\n`;
+        csvContent += `${member.saccoNumber},${member.name},${member.totalSavings},${member.loanLimit},${member.outstandingLoans || 0},${member.availableLoanLimit || 0},${member.totalLoans}\n`;
       });
     } else {
       // CSV for Individual Member Report
       csvContent = `Member Report - ${reportData.member.name}\n`;
       csvContent += `SACCO Number: ${reportData.member.saccoNumber}\n`;
       csvContent += `Email: ${reportData.member.email}\n`;
-      csvContent += `Phone: ${reportData.member.phone}\n\n`;
+      csvContent += `Phone: ${reportData.member.phone}\n`;
+      csvContent += `Total Savings: KES ${reportData.member.totalSavings}\n`;
+      csvContent += `Loan Limit: KES ${reportData.member.loanLimit}\n`;
+      csvContent += `Outstanding Loans: KES ${reportData.member.outstandingLoans || 0}\n`;
+      csvContent += `Available Loan Limit: KES ${reportData.member.availableLoanLimit || 0}\n\n`;
       
       csvContent += "Loan ID,Amount,Status,Interest Rate,Created Date\n";
       reportData.loans.forEach(loan => {
@@ -177,42 +181,38 @@ export default function Reports() {
             className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500"
           >
             <option value="">All Months</option>
-            <option value="1">January</option>
-            <option value="2">February</option>
-            <option value="3">March</option>
-            <option value="4">April</option>
-            <option value="5">May</option>
-            <option value="6">June</option>
-            <option value="7">July</option>
-            <option value="8">August</option>
-            <option value="9">September</option>
-            <option value="10">October</option>
-            <option value="11">November</option>
-            <option value="12">December</option>
+            {Array.from({ length: 12 }, (_, i) => (
+              <option key={i + 1} value={i + 1}>
+                {new Date(0, i).toLocaleString('default', { month: 'long' })}
+              </option>
+            ))}
           </select>
         </div>
         
         <div>
           <label className="block text-gray-700 mb-2 font-semibold">Year</label>
-          <input
-            type="number"
+          <select
             value={year}
             onChange={(e) => {
               setYear(e.target.value);
               setReportData(null);
             }}
-            min="2020"
-            max="2030"
             className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-red-500"
-          />
+          >
+            {Array.from({ length: 5 }, (_, i) => {
+              const y = new Date().getFullYear() - i;
+              return <option key={y} value={y}>{y}</option>;
+            })}
+          </select>
         </div>
       </div>
       
-      <div className="flex gap-4 mb-6">
+      {/* Action Buttons */}
+      <div className="flex gap-3 mb-6">
         <button
           onClick={generateReport}
           disabled={loading}
-          className="bg-red-700 text-white px-6 py-2 rounded-lg hover:bg-red-800 transition disabled:bg-gray-400"
+          className="bg-red-700 text-white px-6 py-2 rounded hover:bg-red-800 transition disabled:bg-gray-400"
         >
           {loading ? "Generating..." : "Generate Report"}
         </button>
@@ -220,22 +220,22 @@ export default function Reports() {
         {reportData && (
           <>
             <button
-              onClick={downloadCSV}
-              className="bg-green-700 text-white px-6 py-2 rounded-lg hover:bg-green-800 transition"
+              onClick={downloadPDF}
+              className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition"
             >
-              📊 Download CSV
+              Print/Save PDF
             </button>
             <button
-              onClick={downloadPDF}
-              className="bg-blue-700 text-white px-6 py-2 rounded-lg hover:bg-blue-800 transition"
+              onClick={downloadCSV}
+              className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition"
             >
-              📄 Print/PDF
+              Download CSV
             </button>
             <button
               onClick={downloadReport}
-              className="bg-purple-700 text-white px-6 py-2 rounded-lg hover:bg-purple-800 transition"
+              className="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 transition"
             >
-              💾 Download JSON
+              Download JSON
             </button>
           </>
         )}
@@ -243,32 +243,21 @@ export default function Reports() {
       
       {/* Report Display */}
       {reportData && (
-        <div className="border-t pt-6" id="report-content">
-          <div className="mb-4 no-print">
-            <h3 className="text-xl font-bold text-gray-800">
-              Report Results
-              {reportData.period?.month && reportData.period?.year && 
-                ` - ${new Date(reportData.period.year, reportData.period.month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}`
-              }
-              {!reportData.period?.month && reportData.period?.year && 
-                ` - ${reportData.period.year}`
-              }
-            </h3>
-          </div>
-
-          <div className="print-only">
-            <h1 style={{textAlign: 'center', color: '#b91c1c'}}>AIC TESTIMONY SACCO</h1>
-            <h2 style={{textAlign: 'center'}}>
-              {reportType === "all" ? "All Members Report" : "Individual Member Report"}
-            </h2>
-            <p style={{textAlign: 'center', color: '#666'}}>
-              Generated on {new Date().toLocaleDateString()}
-            </p>
-            <hr style={{margin: '20px 0'}} />
-          </div>
-          
+        <div id="report-content" className="border-t pt-6">
           {reportType === "all" ? (
             <div>
+              {/* All Members Report */}
+              <div className="mb-6">
+                <h3 className="text-xl font-bold text-gray-800 mb-2">
+                  All Members Summary Report
+                </h3>
+                <p className="text-gray-600">
+                  {month && `Month: ${new Date(0, parseInt(month) - 1).toLocaleString('default', { month: 'long' })}`}
+                  {month && year && ' | '}
+                  {year && `Year: ${year}`}
+                </p>
+              </div>
+              
               {/* Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <div className="bg-blue-50 p-4 rounded-lg summary-card">
@@ -293,16 +282,18 @@ export default function Reports() {
                 </div>
               </div>
               
-              {/* Members Table */}
+              {/* ✅ UPDATED Members Table - Shows actual savings and loan limits */}
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Member</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">SACCO #</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Savings</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Loans</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Loan Limit</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Total Savings</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Loan Limit</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Outstanding</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Available</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Loans</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -310,13 +301,19 @@ export default function Reports() {
                       <tr key={m.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm text-gray-900">{m.name}</td>
                         <td className="px-4 py-3 text-sm text-gray-900">{m.saccoNumber}</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-green-600">
+                        <td className="px-4 py-3 text-sm font-semibold text-green-600 text-right">
                           KES {m.totalSavings.toLocaleString()}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{m.totalLoans}</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-blue-600">
+                        <td className="px-4 py-3 text-sm font-semibold text-blue-600 text-right">
                           KES {m.loanLimit.toLocaleString()}
                         </td>
+                        <td className="px-4 py-3 text-sm text-orange-600 text-right">
+                          KES {(m.outstandingLoans || 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-purple-600 text-right">
+                          KES {(m.availableLoanLimit || 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900 text-center">{m.totalLoans}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -333,12 +330,12 @@ export default function Reports() {
                 <p className="text-gray-600">Phone: {reportData.member.phone}</p>
               </div>
               
-              {/* Summary */}
+              {/* ✅ UPDATED Summary - Shows actual total savings and available loan limit */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <div className="bg-green-50 p-4 rounded-lg summary-card">
                   <p className="text-gray-600 text-sm">Total Savings</p>
                   <p className="text-2xl font-bold text-green-700">
-                    KES {reportData.summary.totalSavings.toLocaleString()}
+                    KES {reportData.member.totalSavings.toLocaleString()}
                   </p>
                   <p className="text-xs text-gray-500">{reportData.summary.savingsCount} deposits</p>
                 </div>
@@ -347,7 +344,24 @@ export default function Reports() {
                   <p className="text-2xl font-bold text-blue-700">
                     KES {reportData.member.loanLimit.toLocaleString()}
                   </p>
+                  <p className="text-xs text-gray-500">3x Savings</p>
                 </div>
+                <div className="bg-orange-50 p-4 rounded-lg summary-card">
+                  <p className="text-gray-600 text-sm">Outstanding Loans</p>
+                  <p className="text-2xl font-bold text-orange-700">
+                    KES {(reportData.member.outstandingLoans || 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg summary-card">
+                  <p className="text-gray-600 text-sm">Available Limit</p>
+                  <p className="text-2xl font-bold text-purple-700">
+                    KES {(reportData.member.availableLoanLimit || 0).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+              
+              {/* Additional Stats */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-red-50 p-4 rounded-lg summary-card">
                   <p className="text-gray-600 text-sm">Total Loans</p>
                   <p className="text-2xl font-bold text-red-700">{reportData.summary.totalLoans}</p>
@@ -422,6 +436,7 @@ export default function Reports() {
                           <p className="font-semibold text-green-700">
                             KES {saving.amount.toLocaleString()}
                           </p>
+                          <p className="text-xs text-gray-600">{saving.source || 'Savings Deposit'}</p>
                           <p className="text-xs text-gray-500">
                             {new Date(saving.savedAt).toLocaleDateString()}
                           </p>

@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import HomePage from "./components/HomePage";
 import LoginPage from "./components/LoginPage";
 import MemberDashboard from "./components/MemberDashboard";
 import AdminDashboard from "./components/AdminDashboard";
 import MemberDeclarationForm from "./components/MemberDeclarationForm";
-import API, { setAuthToken } from "./api";  // ← IMPORTANT: Import setAuthToken
+import API, { setAuthToken } from "./api";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -18,7 +18,7 @@ function App() {
     const storedUser = localStorage.getItem("user");
 
     if (token && role && storedUser) {
-      setAuthToken(token);  // ← Set token in API headers on mount
+      setAuthToken(token);
       setUser({ token, role, user: JSON.parse(storedUser) });
       checkDeclarationStatus(role);
     } else {
@@ -46,7 +46,7 @@ function App() {
     localStorage.setItem("token", token);
     localStorage.setItem("role", role);
     localStorage.setItem("user", JSON.stringify(userData));
-    setAuthToken(token);  // ← Set token in API headers on login
+    setAuthToken(token);
     
     setUser({ token, role, user: userData });
     
@@ -58,7 +58,7 @@ function App() {
     }
   };
 
-  // ✅ FIXED LOGOUT FUNCTION
+  // ✅ FIXED LOGOUT FUNCTION - Now properly redirects to home
   const handleLogout = () => {
     // Clear localStorage
     localStorage.removeItem("token");
@@ -72,7 +72,7 @@ function App() {
     setUser(null);
     setNeedsDeclaration(false);
     
-    // Force navigation to homepage (this is the key!)
+    // ✅ FIX: Force redirect to home page
     window.location.href = "/";
   };
 
