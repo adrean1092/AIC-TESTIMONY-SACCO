@@ -1,615 +1,615 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState } from "react";
 import API from "../api";
-import Reports from "./Reports";
-import DividendsManagement from "./Dividendsmanagement";
-// ✅ NEW: Import the modal components
-import AddMemberModal from "./AddMemberModal";
-import EditLoanModal from "./EditLoanModal";
+import { getCounties, getSubCounties } from "../../../backend/routes/kenyan-locations";
 
-const AdminDashboard = () => {
-  const [activeTab, setActiveTab] = useState("members"); // members, dividends, reports
-  const [members, setMembers] = useState([]);
-  const [loans, setLoans] = useState([]);
-  const [newMember, setNewMember] = useState({ 
-    full_name: "", 
+export default function AddMemberModal({ onClose, onSuccess }) {
+  const [mode, setMode] = useState("single"); // "single" or "bulk"
+  
+  // Single member state
+  const [formData, setFormData] = useState({
+    full_name: "",
     id_number: "",
-    email: "", 
-    phone: "", 
+    email: "",
+    phone: "",
     password: "",
-    role: "MEMBER"
+    role: "MEMBER",
+    sacco_number: "",
+    initial_savings: ""
   });
-  const [paymentAmount, setPaymentAmount] = useState({});
-  const [savingsAmount, setSavingsAmount] = useState({});
-  const [editMember, setEditMember] = useState(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentResult, setPaymentResult] = useState(null);
 
-  // ✅ NEW: Modal state for Add Member and Edit Loan
-  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [editingLoan, setEditingLoan] = useState(null);
+  const [hasExistingLoan, setHasExistingLoan] = useState(false);
+  const [existingLoan, setExistingLoan] = useState({
+    amount: "",
+    interest_rate: "1.045",
+    repayment_period: "",
+    loan_purpose: "",
+    created_at: new Date().toISOString().split('T')[0],
+    status: "APPROVED"
+  });
 
-  const navigate = useNavigate();
+  // Bulk upload state
+  const [bulkFile, setBulkFile] = useState(null);
+  const [uploadedMembers, setUploadedMembers] = useState([]);
+  const [editingEmailIndex, setEditingEmailIndex] = useState(null);
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("user");
-    window.location.href = "/";
-  };
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const loadMembers = async () => {
+  const counties = getCounties();
+  const subCounties = formData.county ? getSubCounties(formData.county) : [];
+
+  // Handle file upload (Excel or CSV)
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setBulkFile(file);
+    setLoading(true);
+
     try {
-      const res = await API.get("/admin/members");
-      setMembers(res.data);
+      const reader = new FileReader();
+      
+      reader.onload = async (event) => {
+        const data = event.target.result;
+        
+        if (file.name.endsWith('.csv')) {
+          parseCSV(data);
+        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+          await parseExcel(data);
+        } else {
+          alert("Please upload a CSV or Excel file");
+          setBulkFile(null);
+        }
+        setLoading(false);
+      };
+
+      if (file.name.endsWith('.csv')) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsArrayBuffer(file);
+      }
     } catch (error) {
-      console.error("Error loading members:", error);
-      alert("Failed to load members. Please check your authentication.");
+      console.error("Error reading file:", error);
+      alert("Failed to read file");
+      setLoading(false);
     }
   };
 
-  const loadLoans = async () => {
+  // Parse CSV file
+  const parseCSV = (csvText) => {
+    const lines = csvText.split('\n').filter(line => line.trim());
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    
+    const members = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim());
+      
+      const member = {
+        full_name: values[headers.indexOf('full_name')] || values[headers.indexOf('name')] || "",
+        id_number: values[headers.indexOf('id_number')] || values[headers.indexOf('id')] || "",
+        phone: values[headers.indexOf('phone')] || values[headers.indexOf('phone_number')] || "",
+        email: "", // Will be added manually
+        password: `Pass${Math.random().toString(36).slice(-8)}`, // Auto-generate
+        role: "MEMBER",
+        sacco_number: values[headers.indexOf('sacco_number')] || "",
+        initial_savings: values[headers.indexOf('initial_savings')] || values[headers.indexOf('savings')] || "0"
+      };
+      
+      if (member.full_name && member.id_number) {
+        members.push(member);
+      }
+    }
+    
+    setUploadedMembers(members);
+  };
+
+  // Parse Excel file
+  const parseExcel = async (arrayBuffer) => {
     try {
-      const res = await API.get("/admin/loans");
-      setLoans(res.data);
+      // Use SheetJS (xlsx) library - you'll need to install it: npm install xlsx
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+      
+      const members = jsonData.map(row => ({
+        full_name: row.full_name || row.name || row.Full_Name || row.Name || "",
+        id_number: row.id_number || row.id || row.ID_Number || row.ID || "",
+        phone: row.phone || row.phone_number || row.Phone || row.Phone_Number || "",
+        email: "", // Will be added manually
+        password: `Pass${Math.random().toString(36).slice(-8)}`, // Auto-generate
+        role: "MEMBER",
+        sacco_number: row.sacco_number || row.SACCO_Number || "",
+        initial_savings: row.initial_savings || row.savings || row.Initial_Savings || "0"
+      })).filter(m => m.full_name && m.id_number);
+      
+      setUploadedMembers(members);
     } catch (error) {
-      console.error("Error loading loans:", error);
-      alert("Failed to load loans. Please check your authentication.");
+      console.error("Error parsing Excel:", error);
+      alert("Failed to parse Excel file. Make sure xlsx library is installed.");
     }
   };
 
-  useEffect(() => {
-    loadMembers();
-    loadLoans();
-  }, []);
+  // Update email for a member
+  const updateMemberEmail = (index, email) => {
+    const updated = [...uploadedMembers];
+    updated[index].email = email;
+    setUploadedMembers(updated);
+  };
 
-  const addMember = async () => {
-    if (!newMember.full_name || !newMember.id_number || !newMember.email || !newMember.phone || !newMember.password) {
-      alert("Please fill in all fields");
-      return;
-    }
+  // Download CSV template
+  const downloadTemplate = () => {
+    const template = `full_name,id_number,phone,sacco_number,initial_savings
+John Doe,12345678,0712345678,SACCO-0001,10000
+Jane Smith,87654321,0723456789,SACCO-0002,15000`;
+    
+    const blob = new Blob([template], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'member_upload_template.csv';
+    a.click();
+  };
+
+  // Submit single member
+  const handleSingleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
     try {
-      await API.post("/admin/members", newMember);
-      setNewMember({ full_name: "", id_number: "", email: "", phone: "", password: "", role: "MEMBER" });
-      loadMembers();
+      const payload = {
+        full_name: formData.full_name,
+        id_number: formData.id_number,
+        email: formData.email,
+        phone: formData.phone,
+        password: formData.password,
+        role: formData.role,
+        sacco_number: formData.sacco_number || undefined,
+        initial_savings: formData.initial_savings ? parseFloat(formData.initial_savings) : undefined,
+        existing_loan: hasExistingLoan && existingLoan.amount ? {
+          amount: parseFloat(existingLoan.amount),
+          interest_rate: parseFloat(existingLoan.interest_rate),
+          repayment_period: parseInt(existingLoan.repayment_period),
+          loan_purpose: existingLoan.loan_purpose,
+          created_at: existingLoan.created_at,
+          status: existingLoan.status
+        } : undefined
+      };
+
+      await API.post("/admin/members", payload);
       alert("Member added successfully!");
+      onSuccess();
+      onClose();
     } catch (error) {
       console.error("Error adding member:", error);
-      alert("Failed to add member: " + (error.response?.data?.message || error.message));
+      alert(error.response?.data?.message || "Failed to add member");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const updateMember = async () => {
-    try {
-      await API.put(`/admin/members/${editMember.id}`, editMember);
-      setEditMember(null);
-      loadMembers();
-      alert("Member updated successfully!");
-    } catch (error) {
-      console.error("Error updating member:", error);
-      alert("Failed to update member: " + (error.response?.data?.message || error.message));
-    }
-  };
-
-  const deleteMember = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this member?")) return;
-    try {
-      await API.delete(`/admin/members/${id}`);
-      loadMembers();
-      alert("Member deleted successfully!");
-    } catch (error) {
-      console.error("Error deleting member:", error);
-      alert("Failed to delete member: " + (error.response?.data?.message || error.message));
-    }
-  };
-
-  const updateSavings = async (memberId) => {
-    const amount = savingsAmount[memberId];
-    if (!amount || parseFloat(amount) <= 0) {
-      alert("Please enter a valid amount");
-      return;
-    }
-    try {
-      await API.post(`/admin/members/${memberId}/savings`, { amount: parseFloat(amount) });
-      setSavingsAmount({ ...savingsAmount, [memberId]: "" });
-      loadMembers();
-      alert("Savings updated successfully!");
-    } catch (error) {
-      console.error("Error updating savings:", error);
-      alert("Failed to update savings: " + (error.response?.data?.message || error.message));
-    }
-  };
-
-  const approveLoan = async (loanId) => {
-    try {
-      await API.put(`/admin/loans/${loanId}/approve`);
-      loadLoans();
-      loadMembers();
-      alert("Loan approved successfully!");
-    } catch (error) {
-      console.error("Error approving loan:", error);
-      alert("Failed to approve loan: " + (error.response?.data?.message || error.message));
-    }
-  };
-
-  const rejectLoan = async (loanId) => {
-    try {
-      await API.put(`/admin/loans/${loanId}/reject`);
-      loadLoans();
-      alert("Loan rejected successfully!");
-    } catch (error) {
-      console.error("Error rejecting loan:", error);
-      alert("Failed to reject loan: " + (error.response?.data?.message || error.message));
-    }
-  };
-
-  const recordPayment = async (loanId) => {
-    const amount = paymentAmount[loanId];
-    if (!amount || parseFloat(amount) <= 0) {
-      alert("Please enter a valid payment amount");
+  // Submit bulk members
+  const handleBulkSubmit = async () => {
+    // Validate all members have emails
+    const missingEmails = uploadedMembers.filter(m => !m.email);
+    if (missingEmails.length > 0) {
+      alert(`Please add email addresses for all ${missingEmails.length} member(s)`);
       return;
     }
 
-    try {
-      const res = await API.post(`/admin/loans/${loanId}/payment`, { 
-        paymentAmount: parseFloat(amount) 
-      });
-      
-      setPaymentResult(res.data);
-      setShowPaymentModal(true);
-      setPaymentAmount({ ...paymentAmount, [loanId]: "" });
-      loadLoans();
-      loadMembers();
-    } catch (error) {
-      console.error("Error recording payment:", error);
-      alert("Failed to record payment: " + (error.response?.data?.message || error.message));
+    setLoading(true);
+    let successCount = 0;
+    let failCount = 0;
+    const errors = [];
+
+    for (const member of uploadedMembers) {
+      try {
+        await API.post("/admin/members", {
+          full_name: member.full_name,
+          id_number: member.id_number,
+          email: member.email,
+          phone: member.phone,
+          password: member.password,
+          role: member.role,
+          sacco_number: member.sacco_number || undefined,
+          initial_savings: member.initial_savings ? parseFloat(member.initial_savings) : undefined
+        });
+        successCount++;
+      } catch (error) {
+        failCount++;
+        errors.push(`${member.full_name}: ${error.response?.data?.message || error.message}`);
+      }
+    }
+
+    setLoading(false);
+    
+    if (failCount === 0) {
+      alert(`✅ Successfully added all ${successCount} members!`);
+      onSuccess();
+      onClose();
+    } else {
+      alert(`✅ Added ${successCount} members\n❌ Failed ${failCount} members\n\nErrors:\n${errors.join('\n')}`);
+      if (successCount > 0) {
+        onSuccess();
+      }
     }
   };
+
+  // Calculate loan preview (for single mode)
+  const calculateLoanPreview = () => {
+    if (!hasExistingLoan || !existingLoan.amount) return null;
+
+    const amount = parseFloat(existingLoan.amount) || 0;
+    const rate = parseFloat(existingLoan.interest_rate) || 0;
+    const period = parseInt(existingLoan.repayment_period) || 0;
+
+    if (!amount || !rate || !period) return null;
+
+    const processingFee = amount * 0.005;
+    const principalWithFee = amount + processingFee;
+    const monthlyRate = rate / 100;
+    const totalInterest = principalWithFee * monthlyRate * period;
+    const totalPayable = principalWithFee + totalInterest;
+    const monthlyPayment = totalPayable / period;
+
+    return {
+      processingFee,
+      principalWithFee,
+      totalInterest,
+      totalPayable,
+      monthlyPayment,
+      annualRate: (rate * 12).toFixed(2)
+    };
+  };
+
+  const loanPreview = calculateLoanPreview();
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      {/* Header */}
-      <div className="bg-white shadow rounded-lg p-4 mb-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-gray-800">Admin Dashboard</h1>
-          <button 
-            onClick={handleLogout} 
-            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition"
-          >
-            Logout
-          </button>
-        </div>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="flex gap-4 mb-6">
-        <button 
-          onClick={() => setActiveTab("members")} 
-          className={`px-6 py-3 rounded-lg font-semibold transition ${
-            activeTab === "members" ? "bg-red-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
-          }`}
-        >
-          Members & Loans
-        </button>
-        <button 
-          onClick={() => setActiveTab("dividends")} 
-          className={`px-6 py-3 rounded-lg font-semibold transition ${
-            activeTab === "dividends" ? "bg-red-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
-          }`}
-        >
-          Dividends
-        </button>
-        <button 
-          onClick={() => setActiveTab("reports")} 
-          className={`px-6 py-3 rounded-lg font-semibold transition ${
-            activeTab === "reports" ? "bg-red-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
-          }`}
-        >
-          Reports
-        </button>
-      </div>
-
-      {/* Members & Loans Tab */}
-      {activeTab === "members" && (
-        <>
-          {/* ✅ UPDATED: Add Member Section - Now uses Modal */}
-          <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-gray-800">Add New Member</h2>
-              {/* ✅ NEW: Button to open the enhanced modal */}
-              <button
-                onClick={() => setShowAddMemberModal(true)}
-                className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold flex items-center gap-2"
-              >
-                <span>➕</span>
-                <span>Add Member (Enhanced)</span>
-              </button>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-y-auto">
+        {/* Header */}
+        <div className="bg-red-700 text-white p-6 sticky top-0 z-10">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-2xl font-bold">Add Members</h2>
+              <p className="text-red-100 text-sm mt-1">
+                Add members individually or bulk upload from Excel/CSV
+              </p>
             </div>
-
-            {/* Keep the old quick add form for simple additions */}
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
-              <input 
-                type="text" 
-                placeholder="Full Name" 
-                className="border border-gray-300 p-3 rounded-lg" 
-                value={newMember.full_name} 
-                onChange={e => setNewMember({...newMember, full_name: e.target.value})} 
-              />
-              <input 
-                type="text" 
-                placeholder="ID Number" 
-                className="border border-gray-300 p-3 rounded-lg" 
-                value={newMember.id_number} 
-                onChange={e => setNewMember({...newMember, id_number: e.target.value})} 
-              />
-              <input 
-                type="email" 
-                placeholder="Email" 
-                className="border border-gray-300 p-3 rounded-lg" 
-                value={newMember.email} 
-                onChange={e => setNewMember({...newMember, email: e.target.value})} 
-              />
-              <input 
-                type="tel" 
-                placeholder="Phone" 
-                className="border border-gray-300 p-3 rounded-lg" 
-                value={newMember.phone} 
-                onChange={e => setNewMember({...newMember, phone: e.target.value})} 
-              />
-              <input 
-                type="password" 
-                placeholder="Password" 
-                className="border border-gray-300 p-3 rounded-lg" 
-                value={newMember.password} 
-                onChange={e => setNewMember({...newMember, password: e.target.value})} 
-              />
-              <select 
-                className="border border-gray-300 p-3 rounded-lg" 
-                value={newMember.role} 
-                onChange={e => setNewMember({...newMember, role: e.target.value})}
-              >
-                <option value="MEMBER">Member</option>
-                <option value="ADMIN">Admin</option>
-              </select>
-              <button 
-                onClick={addMember} 
-                className="bg-red-600 text-white p-3 rounded-lg hover:bg-red-700 transition font-semibold"
-              >
-                Quick Add
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              💡 Use "Quick Add" for simple members, or "Add Member (Enhanced)" for members with existing loans/savings
-            </p>
-          </div>
-
-          {/* Members Table */}
-          <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Members</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-green-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">SACCO #</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">ID Number</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Email</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Phone</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Savings</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Loan Limit</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Add Savings</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {members.map((m, idx) => (
-                    <tr key={`member-${idx}`} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-900">{m.sacco_number || 'N/A'}</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-900">{m.full_name}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{m.id_number}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{m.email}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{m.phone}</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-green-600">
-                        KES {parseFloat(m.savings || 0).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-blue-600">
-                        KES {parseFloat(m.loan_limit || 0).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        {m.role === "MEMBER" && (
-                          <div className="flex gap-1">
-                            <input 
-                              type="number" 
-                              placeholder="Amount" 
-                              className="border border-gray-300 p-1 rounded w-24 text-sm" 
-                              value={savingsAmount[m.id] || ""} 
-                              onChange={e => setSavingsAmount({...savingsAmount, [m.id]: e.target.value})} 
-                            />
-                            <button 
-                              onClick={() => updateSavings(m.id)} 
-                              className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition"
-                            >
-                              Add
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <div className="flex gap-1">
-                          <button 
-                            onClick={() => setEditMember(m)} 
-                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition"
-                          >
-                            Edit
-                          </button>
-                          <button 
-                            onClick={() => deleteMember(m.id)} 
-                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Edit Member Modal */}
-          {editMember && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white p-8 rounded-lg shadow-xl max-w-md w-full">
-                <h2 className="text-2xl font-bold text-gray-800 mb-4">Edit Member</h2>
-                <div className="space-y-3">
-                  <input 
-                    type="text" 
-                    placeholder="Full Name" 
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    value={editMember.full_name}
-                    onChange={(e) => setEditMember({...editMember, full_name: e.target.value})}
-                  />
-                  <input 
-                    type="text" 
-                    placeholder="ID Number" 
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    value={editMember.id_number}
-                    onChange={(e) => setEditMember({...editMember, id_number: e.target.value})}
-                  />
-                  <input 
-                    type="email" 
-                    placeholder="Email" 
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    value={editMember.email}
-                    onChange={(e) => setEditMember({...editMember, email: e.target.value})}
-                  />
-                  <input 
-                    type="tel" 
-                    placeholder="Phone" 
-                    className="w-full border border-gray-300 p-3 rounded-lg"
-                    value={editMember.phone}
-                    onChange={(e) => setEditMember({...editMember, phone: e.target.value})}
-                  />
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setEditMember(null)}
-                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg hover:bg-gray-300 transition font-semibold"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={updateMember}
-                      className="flex-1 bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 transition font-semibold"
-                    >
-                      Save Changes
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Loans Table */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Loans Management</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-blue-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Member</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Amount</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Interest %</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Created</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Guarantor</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Record Payment</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {loans.map((l, idx) => {
-                    const principal = parseFloat(l.principal_amount || 0);
-                    const total = parseFloat(l.initial_amount || 0);
-                    const interest = total - principal;
-                    const currentBalance = parseFloat(l.amount || 0);
-                    
-                    return (
-                      <tr key={`loan-${idx}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm">
-                          <div className="font-semibold text-gray-900">{l.memberName}</div>
-                          <div className="text-xs text-gray-500">{l.saccoNumber}</div>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <div className="font-semibold text-red-600">
-                            KES {total.toLocaleString()}
-                          </div>
-                          <div className="text-xs text-gray-600">
-                            Balance: KES {currentBalance.toLocaleString()}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{l.interest_rate || 10}%</td>
-                        <td className="px-4 py-3 text-sm">
-                          <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                            l.status === "PENDING" ? "bg-yellow-100 text-yellow-800" :
-                            l.status === "APPROVED" ? "bg-green-100 text-green-800" :
-                            "bg-red-100 text-red-800"
-                          }`}>
-                            {l.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">
-                          {l.created_at ? new Date(l.created_at).toLocaleDateString() : 'N/A'}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-900">
-                          <div className="space-y-1">
-                            <div className="font-semibold">{l.guarantorName}</div>
-                            <div className="text-xs text-gray-600">{l.guarantorEmail}</div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {l.status === "APPROVED" && currentBalance > 0 && (
-                            <div className="flex gap-1">
-                              <input 
-                                type="number" 
-                                placeholder="Amount" 
-                                className="border border-gray-300 p-1 rounded w-24 text-sm" 
-                                value={paymentAmount[l.id] || ""} 
-                                onChange={e => setPaymentAmount({...paymentAmount, [l.id]: e.target.value})} 
-                              />
-                              <button 
-                                onClick={() => recordPayment(l.id)} 
-                                className="bg-orange-600 text-white px-3 py-1 rounded text-sm hover:bg-orange-700 transition"
-                              >
-                                Pay
-                              </button>
-                            </div>
-                          )}
-                          {l.status === "APPROVED" && currentBalance === 0 && (
-                            <span className="text-green-600 font-semibold text-xs">✓ Fully Paid</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {/* ✅ NEW: Edit Loan Button */}
-                          <div className="flex gap-1 flex-wrap">
-                            <button 
-                              onClick={() => setEditingLoan(l)} 
-                              className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition"
-                            >
-                              Edit
-                            </button>
-                            
-                            {l.status === "PENDING" && (
-                              <>
-                                <button 
-                                  onClick={() => approveLoan(l.id)} 
-                                  className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition"
-                                >
-                                  Approve
-                                </button>
-                                <button 
-                                  onClick={() => rejectLoan(l.id)} 
-                                  className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition"
-                                >
-                                  Reject
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Dividends Tab */}
-      {activeTab === "dividends" && <DividendsManagement />}
-
-      {/* Reports Tab */}
-      {activeTab === "reports" && <Reports />}
-
-      {/* Payment Result Modal */}
-      {showPaymentModal && paymentResult && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-8 rounded-lg shadow-xl max-w-md w-full">
-            <h2 className="text-2xl font-bold text-green-600 mb-4">✓ Payment Recorded</h2>
-            
-            <div className="space-y-3 mb-6">
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-sm text-gray-600">Amount Paid</p>
-                <p className="text-xl font-bold text-gray-900">
-                  KES {paymentResult.paid?.toLocaleString()}
-                </p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-blue-50 p-3 rounded">
-                  <p className="text-xs text-gray-600">Interest Paid</p>
-                  <p className="text-sm font-bold text-blue-700">
-                    KES {paymentResult.breakdown?.interestPaid?.toLocaleString()}
-                  </p>
-                </div>
-                <div className="bg-purple-50 p-3 rounded">
-                  <p className="text-xs text-gray-600">Principal Paid</p>
-                  <p className="text-sm font-bold text-purple-700">
-                    KES {paymentResult.breakdown?.principalPaid?.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="bg-green-50 p-3 rounded">
-                <p className="text-sm text-gray-600">Remaining Balance</p>
-                <p className="text-xl font-bold text-green-700">
-                  KES {paymentResult.remaining?.toLocaleString()}
-                </p>
-              </div>
-              
-              {paymentResult.fullyPaid && (
-                <div className="bg-green-100 p-3 rounded text-center">
-                  <p className="text-green-800 font-bold">🎉 Loan Fully Paid!</p>
-                </div>
-              )}
-            </div>
-            
             <button
-              onClick={() => setShowPaymentModal(false)}
-              className="w-full bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 transition font-semibold"
+              onClick={onClose}
+              className="text-white hover:text-red-200 text-3xl font-bold leading-none"
             >
-              Close
+              ×
             </button>
           </div>
         </div>
-      )}
 
-      {/* ✅ NEW: Add Member Modal (Enhanced) */}
-      {showAddMemberModal && (
-        <AddMemberModal
-          onClose={() => setShowAddMemberModal(false)}
-          onSuccess={() => {
-            loadMembers();
-            loadLoans(); // Refresh loans too in case member has existing loan
-          }}
-        />
-      )}
+        <div className="p-6 space-y-6">
+          {/* Mode Selection */}
+          <div className="flex gap-4 border-b pb-4">
+            <button
+              onClick={() => setMode("single")}
+              className={`px-6 py-3 rounded-lg font-semibold transition ${
+                mode === "single"
+                  ? "bg-red-700 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              Single Member
+            </button>
+            <button
+              onClick={() => setMode("bulk")}
+              className={`px-6 py-3 rounded-lg font-semibold transition ${
+                mode === "bulk"
+                  ? "bg-red-700 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              Bulk Upload
+            </button>
+          </div>
 
-      {/* ✅ NEW: Edit Loan Modal */}
-      {editingLoan && (
-        <EditLoanModal
-          loan={editingLoan}
-          onClose={() => setEditingLoan(null)}
-          onSuccess={() => {
-            loadLoans();
-            loadMembers(); // Refresh members too for updated loan limits
-          }}
-        />
-      )}
+          {/* SINGLE MEMBER MODE */}
+          {mode === "single" && (
+            <form onSubmit={handleSingleSubmit} className="space-y-6">
+              {/* Role Selection */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Account Type <span className="text-red-600">*</span>
+                </label>
+                <select
+                  required
+                  value={formData.role}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                >
+                  <option value="MEMBER">Member</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </div>
+
+              {/* Personal Information */}
+              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                <h3 className="text-lg font-bold text-gray-800 mb-4">Personal Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Full Name <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.full_name}
+                      onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      placeholder="John Doe"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      ID/Passport Number <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.id_number}
+                      onChange={(e) => setFormData({ ...formData, id_number: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      placeholder="12345678"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Email <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      placeholder="john@example.com"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Phone Number <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      placeholder="0712345678"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Password <span className="text-red-600">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        required
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg p-3 pr-10 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                        placeholder="••••••••"
+                        minLength="6"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      >
+                        {showPassword ? "👁️" : "👁️‍🗨️"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {formData.role === "MEMBER" && (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        SACCO Number (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.sacco_number}
+                        onChange={(e) => setFormData({ ...formData, sacco_number: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                        placeholder="e.g., SACCO-0123"
+                      />
+                      <p className="text-xs text-gray-600 mt-1">Leave blank to auto-generate</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Initial Savings */}
+              {formData.role === "MEMBER" && (
+                <div className="bg-green-50 rounded-lg p-6 border border-green-200">
+                  <h3 className="text-lg font-bold text-green-900 mb-4">Initial Savings (Optional)</h3>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Initial Savings Amount (KES)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.initial_savings}
+                      onChange={(e) => setFormData({ ...formData, initial_savings: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="10000.00"
+                    />
+                    <p className="text-xs text-gray-600 mt-2">
+                      💡 Loan limit will be 3x savings
+                    </p>
+                    {formData.initial_savings && parseFloat(formData.initial_savings) > 0 && (
+                      <div className="mt-3 p-3 bg-white rounded border border-green-300">
+                        <p className="text-sm font-semibold text-green-900">
+                          Loan Limit: KES {(parseFloat(formData.initial_savings) * 3).toLocaleString()}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <div className="flex justify-end space-x-4 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-semibold hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`px-6 py-3 rounded-lg font-semibold transition ${
+                    loading
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-red-700 hover:bg-red-800 text-white"
+                  }`}
+                >
+                  {loading ? "Adding..." : "Add Member"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* BULK UPLOAD MODE */}
+          {mode === "bulk" && (
+            <div className="space-y-6">
+              {/* Instructions */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                <h3 className="text-lg font-bold text-blue-900 mb-3">📋 Bulk Upload Instructions</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
+                  <li>Download the CSV template and fill in member details</li>
+                  <li>Upload the completed CSV or Excel file</li>
+                  <li>Review the uploaded members and manually add email addresses</li>
+                  <li>Click "Add All Members" to complete the upload</li>
+                </ol>
+                <button
+                  onClick={downloadTemplate}
+                  className="mt-4 bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 transition text-sm font-semibold"
+                >
+                  📥 Download CSV Template
+                </button>
+              </div>
+
+              {/* File Upload */}
+              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                <h3 className="text-lg font-bold text-gray-800 mb-4">Upload File</h3>
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={handleFileUpload}
+                  className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-600 mt-2">
+                  Accepted formats: CSV, Excel (.xlsx, .xls)
+                </p>
+              </div>
+
+              {/* Uploaded Members Table */}
+              {uploadedMembers.length > 0 && (
+                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      Uploaded Members ({uploadedMembers.length})
+                    </h3>
+                    <span className="text-sm text-gray-600">
+                      {uploadedMembers.filter(m => m.email).length} of {uploadedMembers.length} have emails
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">#</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Full Name</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">ID Number</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Phone</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">SACCO Number</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Savings</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Email <span className="text-red-600">*</span></th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Password</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {uploadedMembers.map((member, index) => (
+                          <tr key={index} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-900">{index + 1}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{member.full_name}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{member.id_number}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{member.phone}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{member.sacco_number || "Auto"}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              {parseFloat(member.initial_savings || 0).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="email"
+                                value={member.email}
+                                onChange={(e) => updateMemberEmail(index, e.target.value)}
+                                placeholder="email@example.com"
+                                className={`w-full border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-red-500 ${
+                                  member.email
+                                    ? "border-green-300 bg-green-50"
+                                    : "border-red-300 bg-red-50"
+                                }`}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-600 font-mono">{member.password}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Bulk */}
+              {uploadedMembers.length > 0 && (
+                <div className="flex justify-end space-x-4 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadedMembers([]);
+                      setBulkFile(null);
+                    }}
+                    className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-semibold hover:bg-gray-50 transition"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={handleBulkSubmit}
+                    disabled={loading || uploadedMembers.some(m => !m.email)}
+                    className={`px-6 py-3 rounded-lg font-semibold transition ${
+                      loading || uploadedMembers.some(m => !m.email)
+                        ? "bg-gray-400 cursor-not-allowed"
+                        : "bg-red-700 hover:bg-red-800 text-white"
+                    }`}
+                  >
+                    {loading ? "Adding Members..." : `Add All ${uploadedMembers.length} Members`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
-};
-
-export default AdminDashboard;
+}

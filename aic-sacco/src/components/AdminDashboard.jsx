@@ -222,7 +222,7 @@ const AdminDashboard = () => {
                 className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold flex items-center gap-2"
               >
                 <span>➕</span>
-                <span>Add Member (Enhanced)</span>
+                <span>Add Member</span>
               </button>
             </div>
 
