@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import API from "../api";
-import { getCounties, getSubCounties } from "../../../backend/routes/kenyan-locations";
+import * as XLSX from 'xlsx';
 
 export default function AddMemberModal({ onClose, onSuccess }) {
   const [mode, setMode] = useState("single"); // "single" or "bulk"
@@ -17,139 +17,117 @@ export default function AddMemberModal({ onClose, onSuccess }) {
     initial_savings: ""
   });
 
-  const [hasExistingLoan, setHasExistingLoan] = useState(false);
-  const [existingLoan, setExistingLoan] = useState({
-    amount: "",
-    interest_rate: "1.045",
-    repayment_period: "",
-    loan_purpose: "",
-    created_at: new Date().toISOString().split('T')[0],
-    status: "APPROVED"
-  });
-
   // Bulk upload state
-  const [bulkFile, setBulkFile] = useState(null);
   const [uploadedMembers, setUploadedMembers] = useState([]);
-  const [editingEmailIndex, setEditingEmailIndex] = useState(null);
-
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
 
-  const counties = getCounties();
-  const subCounties = formData.county ? getSubCounties(formData.county) : [];
-
-  // Handle file upload (Excel or CSV)
-  const handleFileUpload = async (e) => {
+  // Handle Excel/CSV file upload
+  const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    setBulkFile(file);
     setLoading(true);
+    setUploadStatus("Reading file...");
 
-    try {
-      const reader = new FileReader();
-      
-      reader.onload = async (event) => {
+    const reader = new FileReader();
+    
+    reader.onload = (event) => {
+      try {
         const data = event.target.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        if (file.name.endsWith('.csv')) {
-          parseCSV(data);
-        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-          await parseExcel(data);
-        } else {
-          alert("Please upload a CSV or Excel file");
-          setBulkFile(null);
+        console.log("Raw Excel data:", jsonData.slice(0, 5));
+        
+        // Find the header row (row with "NAME")
+        let headerRowIndex = -1;
+        for (let i = 0; i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (row.some(cell => String(cell).toUpperCase().includes('NAME'))) {
+            headerRowIndex = i;
+            break;
+          }
         }
+        
+        if (headerRowIndex === -1) {
+          alert("Could not find header row with column names");
+          setLoading(false);
+          return;
+        }
+        
+        const headers = jsonData[headerRowIndex].map(h => String(h || '').trim());
+        console.log("Headers found:", headers);
+        
+        // Find column indices
+        const nameIdx = headers.findIndex(h => h.toUpperCase().includes('NAME') && !h.toUpperCase().includes('NO'));
+        const idIdx = headers.findIndex(h => h.toUpperCase().includes('ID'));
+        const phoneIdx = headers.findIndex(h => h.toUpperCase().includes('MOBILE') || h.toUpperCase().includes('PHONE'));
+        const saccoIdx = headers.findIndex(h => h.toUpperCase().includes('M.') || (h.toUpperCase().includes('NO') && h.toUpperCase().includes('.')));
+        const savingsIdx = headers.findIndex(h => h.toUpperCase().includes('SAVINGS'));
+        const emailIdx = headers.findIndex(h => h.toUpperCase().includes('EMAIL'));
+        
+        console.log("Column indices:", { nameIdx, idIdx, phoneIdx, saccoIdx, savingsIdx, emailIdx });
+        
+        // Process data rows
+        const members = [];
+        for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (!row || row.length === 0) continue;
+          
+          const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
+          const idNumber = row[idIdx] ? String(row[idIdx]).trim() : '';
+          
+          // Skip empty rows or header repetitions
+          if (!name || !idNumber || name.toUpperCase() === 'NAME') continue;
+          
+          const saccoNumber = row[saccoIdx] ? String(row[saccoIdx]).trim() : '';
+          
+          const member = {
+            full_name: name,
+            id_number: idNumber,
+            phone: row[phoneIdx] ? String(row[phoneIdx]).trim() : '',
+            email: row[emailIdx] ? String(row[emailIdx]).trim() : '',
+            password: saccoNumber || `temp${Math.random().toString(36).slice(-6)}`,
+            role: "MEMBER",
+            sacco_number: saccoNumber,
+            initial_savings: row[savingsIdx] ? String(row[savingsIdx]).trim() : '0'
+          };
+          
+          members.push(member);
+        }
+        
+        console.log(`Processed ${members.length} members`);
+        console.log("First member:", members[0]);
+        
+        setUploadedMembers(members);
+        setUploadStatus(`✅ Loaded ${members.length} members`);
         setLoading(false);
-      };
-
-      if (file.name.endsWith('.csv')) {
-        reader.readAsText(file);
-      } else {
-        reader.readAsArrayBuffer(file);
+      } catch (error) {
+        console.error("Error parsing file:", error);
+        alert("Error parsing file: " + error.message);
+        setLoading(false);
+        setUploadStatus("");
       }
-    } catch (error) {
-      console.error("Error reading file:", error);
-      alert("Failed to read file");
+    };
+    
+    reader.onerror = () => {
+      alert("Error reading file");
       setLoading(false);
-    }
-  };
-
-  // Parse CSV file
-  const parseCSV = (csvText) => {
-    const lines = csvText.split('\n').filter(line => line.trim());
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      setUploadStatus("");
+    };
     
-    const members = [];
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim());
-      
-      const member = {
-        full_name: values[headers.indexOf('full_name')] || values[headers.indexOf('name')] || "",
-        id_number: values[headers.indexOf('id_number')] || values[headers.indexOf('id')] || "",
-        phone: values[headers.indexOf('phone')] || values[headers.indexOf('phone_number')] || "",
-        email: "", // Will be added manually
-        password: `Pass${Math.random().toString(36).slice(-8)}`, // Auto-generate
-        role: "MEMBER",
-        sacco_number: values[headers.indexOf('sacco_number')] || "",
-        initial_savings: values[headers.indexOf('initial_savings')] || values[headers.indexOf('savings')] || "0"
-      };
-      
-      if (member.full_name && member.id_number) {
-        members.push(member);
-      }
-    }
-    
-    setUploadedMembers(members);
+    reader.readAsBinaryString(file);
   };
 
-  // Parse Excel file
-  const parseExcel = async (arrayBuffer) => {
-    try {
-      // Use SheetJS (xlsx) library - you'll need to install it: npm install xlsx
-      const XLSX = await import('xlsx');
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet);
-      
-      const members = jsonData.map(row => ({
-        full_name: row.full_name || row.name || row.Full_Name || row.Name || "",
-        id_number: row.id_number || row.id || row.ID_Number || row.ID || "",
-        phone: row.phone || row.phone_number || row.Phone || row.Phone_Number || "",
-        email: "", // Will be added manually
-        password: `Pass${Math.random().toString(36).slice(-8)}`, // Auto-generate
-        role: "MEMBER",
-        sacco_number: row.sacco_number || row.SACCO_Number || "",
-        initial_savings: row.initial_savings || row.savings || row.Initial_Savings || "0"
-      })).filter(m => m.full_name && m.id_number);
-      
-      setUploadedMembers(members);
-    } catch (error) {
-      console.error("Error parsing Excel:", error);
-      alert("Failed to parse Excel file. Make sure xlsx library is installed.");
-    }
-  };
-
-  // Update email for a member
-  const updateMemberEmail = (index, email) => {
+  // Update member field
+  const updateMember = (index, field, value) => {
     const updated = [...uploadedMembers];
-    updated[index].email = email;
+    updated[index][field] = value;
     setUploadedMembers(updated);
-  };
-
-  // Download CSV template
-  const downloadTemplate = () => {
-    const template = `full_name,id_number,phone,sacco_number,initial_savings
-John Doe,12345678,0712345678,SACCO-0001,10000
-Jane Smith,87654321,0723456789,SACCO-0002,15000`;
-    
-    const blob = new Blob([template], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'member_upload_template.csv';
-    a.click();
   };
 
   // Submit single member
@@ -166,44 +144,51 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
         password: formData.password,
         role: formData.role,
         sacco_number: formData.sacco_number || undefined,
-        initial_savings: formData.initial_savings ? parseFloat(formData.initial_savings) : undefined,
-        existing_loan: hasExistingLoan && existingLoan.amount ? {
-          amount: parseFloat(existingLoan.amount),
-          interest_rate: parseFloat(existingLoan.interest_rate),
-          repayment_period: parseInt(existingLoan.repayment_period),
-          loan_purpose: existingLoan.loan_purpose,
-          created_at: existingLoan.created_at,
-          status: existingLoan.status
-        } : undefined
+        initial_savings: formData.initial_savings ? parseFloat(formData.initial_savings) : undefined
       };
 
       await API.post("/admin/members", payload);
-      alert("Member added successfully!");
+      alert("✅ Member added successfully!");
       onSuccess();
       onClose();
     } catch (error) {
       console.error("Error adding member:", error);
-      alert(error.response?.data?.message || "Failed to add member");
+      alert("❌ " + (error.response?.data?.message || "Failed to add member"));
     } finally {
       setLoading(false);
     }
   };
 
-  // Submit bulk members
+  // Submit bulk upload
   const handleBulkSubmit = async () => {
     // Validate all members have emails
     const missingEmails = uploadedMembers.filter(m => !m.email);
     if (missingEmails.length > 0) {
-      alert(`Please add email addresses for all ${missingEmails.length} member(s)`);
+      alert(`⚠️ ${missingEmails.length} members are missing email addresses. Please add emails for all members.`);
       return;
     }
 
+    const confirmed = window.confirm(
+      `Are you sure you want to add ${uploadedMembers.length} members?\n\n` +
+      `This will create member accounts with:\n` +
+      `- Passwords set to their SACCO numbers\n` +
+      `- Initial savings if provided\n\n` +
+      `Click OK to proceed.`
+    );
+    
+    if (!confirmed) return;
+
     setLoading(true);
+    setUploadStatus("Starting bulk upload...");
+    
     let successCount = 0;
     let failCount = 0;
     const errors = [];
 
-    for (const member of uploadedMembers) {
+    for (let i = 0; i < uploadedMembers.length; i++) {
+      const member = uploadedMembers[i];
+      setUploadStatus(`Adding member ${i + 1} of ${uploadedMembers.length}: ${member.full_name}...`);
+      
       try {
         await API.post("/admin/members", {
           full_name: member.full_name,
@@ -213,69 +198,73 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
           password: member.password,
           role: member.role,
           sacco_number: member.sacco_number || undefined,
-          initial_savings: member.initial_savings ? parseFloat(member.initial_savings) : undefined
+          initial_savings: member.initial_savings && parseFloat(member.initial_savings) > 0 
+            ? parseFloat(member.initial_savings) 
+            : undefined
         });
         successCount++;
       } catch (error) {
         failCount++;
-        errors.push(`${member.full_name}: ${error.response?.data?.message || error.message}`);
+        const errorMsg = error.response?.data?.message || error.message;
+        errors.push(`${member.full_name} (${member.id_number}): ${errorMsg}`);
+        console.error(`Error adding ${member.full_name}:`, error);
       }
     }
 
     setLoading(false);
+    setUploadStatus("");
     
-    if (failCount === 0) {
-      alert(`✅ Successfully added all ${successCount} members!`);
+    // Show results
+    let resultMessage = `✅ BULK UPLOAD COMPLETE\n\n`;
+    resultMessage += `Successfully added: ${successCount} members\n`;
+    resultMessage += `Failed: ${failCount} members\n`;
+    
+    if (errors.length > 0) {
+      resultMessage += `\n❌ ERRORS:\n`;
+      if (errors.length <= 10) {
+        resultMessage += errors.join('\n');
+      } else {
+        resultMessage += errors.slice(0, 10).join('\n');
+        resultMessage += `\n... and ${errors.length - 10} more errors`;
+      }
+    }
+    
+    alert(resultMessage);
+    
+    if (successCount > 0) {
       onSuccess();
-      onClose();
-    } else {
-      alert(`✅ Added ${successCount} members\n❌ Failed ${failCount} members\n\nErrors:\n${errors.join('\n')}`);
-      if (successCount > 0) {
-        onSuccess();
+      if (failCount === 0) {
+        onClose();
+      } else {
+        // Keep modal open, clear successful uploads
+        setUploadedMembers([]);
       }
     }
   };
 
-  // Calculate loan preview (for single mode)
-  const calculateLoanPreview = () => {
-    if (!hasExistingLoan || !existingLoan.amount) return null;
-
-    const amount = parseFloat(existingLoan.amount) || 0;
-    const rate = parseFloat(existingLoan.interest_rate) || 0;
-    const period = parseInt(existingLoan.repayment_period) || 0;
-
-    if (!amount || !rate || !period) return null;
-
-    const processingFee = amount * 0.005;
-    const principalWithFee = amount + processingFee;
-    const monthlyRate = rate / 100;
-    const totalInterest = principalWithFee * monthlyRate * period;
-    const totalPayable = principalWithFee + totalInterest;
-    const monthlyPayment = totalPayable / period;
-
-    return {
-      processingFee,
-      principalWithFee,
-      totalInterest,
-      totalPayable,
-      monthlyPayment,
-      annualRate: (rate * 12).toFixed(2)
-    };
+  // Download template
+  const downloadTemplate = () => {
+    const template = `SN,NAME,ID NO.,MOBILE NO.,M. NO.,INITIAL SAVINGS,Email address
+1,John Doe,12345678,0712345678,1,10000,john@example.com
+2,Jane Smith,87654321,0723456789,2,15000,jane@example.com`;
+    
+    const blob = new Blob([template], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'member_template.csv';
+    a.click();
   };
 
-  const loanPreview = calculateLoanPreview();
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-y-auto">
         {/* Header */}
         <div className="bg-red-700 text-white p-6 sticky top-0 z-10">
           <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-2xl font-bold">Add Members</h2>
-              <p className="text-red-100 text-sm mt-1">
-                Add members individually or bulk upload from Excel/CSV
-              </p>
+              <h2 className="text-2xl font-bold">Add New Member(s)</h2>
+              <p className="text-red-100 text-sm mt-1">Add members individually or bulk upload from Excel</p>
             </div>
             <button
               onClick={onClose}
@@ -284,53 +273,36 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
               ×
             </button>
           </div>
-        </div>
 
-        <div className="p-6 space-y-6">
-          {/* Mode Selection */}
-          <div className="flex gap-4 border-b pb-4">
+          {/* Mode Toggle */}
+          <div className="flex space-x-4 mt-4">
             <button
               onClick={() => setMode("single")}
-              className={`px-6 py-3 rounded-lg font-semibold transition ${
+              className={`px-6 py-2 rounded-lg font-semibold transition ${
                 mode === "single"
-                  ? "bg-red-700 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  ? "bg-white text-red-700"
+                  : "bg-red-600 text-white hover:bg-red-500"
               }`}
             >
               Single Member
             </button>
             <button
               onClick={() => setMode("bulk")}
-              className={`px-6 py-3 rounded-lg font-semibold transition ${
+              className={`px-6 py-2 rounded-lg font-semibold transition ${
                 mode === "bulk"
-                  ? "bg-red-700 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  ? "bg-white text-red-700"
+                  : "bg-red-600 text-white hover:bg-red-500"
               }`}
             >
               Bulk Upload
             </button>
           </div>
+        </div>
 
+        <div className="p-6">
           {/* SINGLE MEMBER MODE */}
           {mode === "single" && (
             <form onSubmit={handleSingleSubmit} className="space-y-6">
-              {/* Role Selection */}
-              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Account Type <span className="text-red-600">*</span>
-                </label>
-                <select
-                  required
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                >
-                  <option value="MEMBER">Member</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-              </div>
-
-              {/* Personal Information */}
               <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
                 <h3 className="text-lg font-bold text-gray-800 mb-4">Personal Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -343,21 +315,21 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
                       required
                       value={formData.full_name}
                       onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      className="w-full border border-gray-300 rounded-lg p-3"
                       placeholder="John Doe"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      ID/Passport Number <span className="text-red-600">*</span>
+                      ID Number <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="text"
                       required
                       value={formData.id_number}
                       onChange={(e) => setFormData({ ...formData, id_number: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      className="w-full border border-gray-300 rounded-lg p-3"
                       placeholder="12345678"
                     />
                   </div>
@@ -371,21 +343,21 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
                       required
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      className="w-full border border-gray-300 rounded-lg p-3"
                       placeholder="john@example.com"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Phone Number <span className="text-red-600">*</span>
+                      Phone <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="tel"
                       required
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      className="w-full border border-gray-300 rounded-lg p-3"
                       placeholder="0712345678"
                     />
                   </div>
@@ -400,45 +372,35 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
                         required
                         value={formData.password}
                         onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg p-3 pr-10 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                        placeholder="••••••••"
-                        minLength="6"
+                        className="w-full border border-gray-300 rounded-lg p-3 pr-12"
+                        placeholder="********"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-600"
                       >
                         {showPassword ? "👁️" : "👁️‍🗨️"}
                       </button>
                     </div>
                   </div>
 
-                  {formData.role === "MEMBER" && (
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        SACCO Number (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.sacco_number}
-                        onChange={(e) => setFormData({ ...formData, sacco_number: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                        placeholder="e.g., SACCO-0123"
-                      />
-                      <p className="text-xs text-gray-600 mt-1">Leave blank to auto-generate</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Initial Savings */}
-              {formData.role === "MEMBER" && (
-                <div className="bg-green-50 rounded-lg p-6 border border-green-200">
-                  <h3 className="text-lg font-bold text-green-900 mb-4">Initial Savings (Optional)</h3>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Initial Savings Amount (KES)
+                      SACCO Number (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.sacco_number}
+                      onChange={(e) => setFormData({ ...formData, sacco_number: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-3"
+                      placeholder="Auto-generate if blank"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Initial Savings (KES)
                     </label>
                     <input
                       type="number"
@@ -446,36 +408,30 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
                       min="0"
                       value={formData.initial_savings}
                       onChange={(e) => setFormData({ ...formData, initial_savings: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      className="w-full border border-gray-300 rounded-lg p-3"
                       placeholder="10000.00"
                     />
-                    <p className="text-xs text-gray-600 mt-2">
-                      💡 Loan limit will be 3x savings
-                    </p>
                     {formData.initial_savings && parseFloat(formData.initial_savings) > 0 && (
-                      <div className="mt-3 p-3 bg-white rounded border border-green-300">
-                        <p className="text-sm font-semibold text-green-900">
-                          Loan Limit: KES {(parseFloat(formData.initial_savings) * 3).toLocaleString()}
-                        </p>
-                      </div>
+                      <p className="text-xs text-green-600 mt-1">
+                        💡 Loan limit: KES {(parseFloat(formData.initial_savings) * 3).toLocaleString()}
+                      </p>
                     )}
                   </div>
                 </div>
-              )}
+              </div>
 
-              {/* Submit Button */}
               <div className="flex justify-end space-x-4 pt-4 border-t">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-semibold hover:bg-gray-50 transition"
+                  className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-semibold hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className={`px-6 py-3 rounded-lg font-semibold transition ${
+                  className={`px-6 py-3 rounded-lg font-semibold ${
                     loading
                       ? "bg-gray-400 cursor-not-allowed"
                       : "bg-red-700 hover:bg-red-800 text-white"
@@ -492,119 +448,121 @@ Jane Smith,87654321,0723456789,SACCO-0002,15000`;
             <div className="space-y-6">
               {/* Instructions */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                <h3 className="text-lg font-bold text-blue-900 mb-3">📋 Bulk Upload Instructions</h3>
+                <h3 className="text-lg font-bold text-blue-900 mb-3">📋 How to Bulk Upload</h3>
                 <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
-                  <li>Download the CSV template and fill in member details</li>
-                  <li>Upload the completed CSV or Excel file</li>
-                  <li>Review the uploaded members and manually add email addresses</li>
-                  <li>Click "Add All Members" to complete the upload</li>
+                  <li>Your Excel file should have these columns: NAME, ID NO., MOBILE NO., M. NO., INITIAL SAVINGS, Email address</li>
+                  <li>Upload your Excel file (.xlsx or .xls)</li>
+                  <li>Review the members and add/edit emails if needed</li>
+                  <li>Each member's password will be their SACCO number (M. NO. column)</li>
+                  <li>Click "Add All Members" to complete</li>
                 </ol>
                 <button
                   onClick={downloadTemplate}
-                  className="mt-4 bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 transition text-sm font-semibold"
+                  className="mt-4 bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 text-sm font-semibold"
                 >
-                  📥 Download CSV Template
+                  📥 Download Template
                 </button>
               </div>
 
               {/* File Upload */}
               <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">Upload File</h3>
+                <h3 className="text-lg font-bold text-gray-800 mb-4">Upload Excel File</h3>
                 <input
                   type="file"
-                  accept=".csv,.xlsx,.xls"
+                  accept=".xlsx,.xls"
                   onChange={handleFileUpload}
-                  className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  disabled={loading}
+                  className="w-full border border-gray-300 rounded-lg p-3"
                 />
-                <p className="text-xs text-gray-600 mt-2">
-                  Accepted formats: CSV, Excel (.xlsx, .xls)
-                </p>
+                {uploadStatus && (
+                  <p className="text-sm text-blue-600 mt-2">{uploadStatus}</p>
+                )}
               </div>
 
               {/* Uploaded Members Table */}
               {uploadedMembers.length > 0 && (
-                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                  <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
-                    <h3 className="text-lg font-semibold text-gray-800">
-                      Uploaded Members ({uploadedMembers.length})
-                    </h3>
-                    <span className="text-sm text-gray-600">
-                      {uploadedMembers.filter(m => m.email).length} of {uploadedMembers.length} have emails
-                    </span>
-                  </div>
+                <>
+                  <div className="bg-white rounded-lg border border-gray-200">
+                    <div className="px-6 py-4 bg-gray-50 border-b">
+                      <h3 className="text-lg font-semibold text-gray-800">
+                        📊 Uploaded Members: {uploadedMembers.length}
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {uploadedMembers.filter(m => m.email).length} have emails | 
+                        {' '}{uploadedMembers.filter(m => !m.email).length} missing emails
+                      </p>
+                    </div>
 
-                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-100 sticky top-0">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">#</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Full Name</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">ID Number</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Phone</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">SACCO Number</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Savings</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Email <span className="text-red-600">*</span></th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Password</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {uploadedMembers.map((member, index) => (
-                          <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-900">{index + 1}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900">{member.full_name}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900">{member.id_number}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900">{member.phone}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{member.sacco_number || "Auto"}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900">
-                              {parseFloat(member.initial_savings || 0).toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3">
-                              <input
-                                type="email"
-                                value={member.email}
-                                onChange={(e) => updateMemberEmail(index, e.target.value)}
-                                placeholder="email@example.com"
-                                className={`w-full border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-red-500 ${
-                                  member.email
-                                    ? "border-green-300 bg-green-50"
-                                    : "border-red-300 bg-red-50"
-                                }`}
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-xs text-gray-600 font-mono">{member.password}</td>
+                    <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-100 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">#</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Name</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">ID No.</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Phone</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">SACCO No.</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Savings</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Email *</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">Password</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {uploadedMembers.map((member, index) => (
+                            <tr key={index} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm">{index + 1}</td>
+                              <td className="px-4 py-3 text-sm">{member.full_name}</td>
+                              <td className="px-4 py-3 text-sm">{member.id_number}</td>
+                              <td className="px-4 py-3 text-sm">{member.phone}</td>
+                              <td className="px-4 py-3 text-sm font-mono">{member.sacco_number}</td>
+                              <td className="px-4 py-3 text-sm">{parseFloat(member.initial_savings || 0).toLocaleString()}</td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="email"
+                                  value={member.email}
+                                  onChange={(e) => updateMember(index, 'email', e.target.value)}
+                                  placeholder="email@example.com"
+                                  className={`w-full border rounded px-2 py-1 text-sm ${
+                                    member.email ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"
+                                  }`}
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="text"
+                                  value={member.password}
+                                  onChange={(e) => updateMember(index, 'password', e.target.value)}
+                                  className="w-full border border-gray-300 rounded px-2 py-1 text-xs font-mono"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              )}
 
-              {/* Submit Bulk */}
-              {uploadedMembers.length > 0 && (
-                <div className="flex justify-end space-x-4 pt-4 border-t">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUploadedMembers([]);
-                      setBulkFile(null);
-                    }}
-                    className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-semibold hover:bg-gray-50 transition"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={handleBulkSubmit}
-                    disabled={loading || uploadedMembers.some(m => !m.email)}
-                    className={`px-6 py-3 rounded-lg font-semibold transition ${
-                      loading || uploadedMembers.some(m => !m.email)
-                        ? "bg-gray-400 cursor-not-allowed"
-                        : "bg-red-700 hover:bg-red-800 text-white"
-                    }`}
-                  >
-                    {loading ? "Adding Members..." : `Add All ${uploadedMembers.length} Members`}
-                  </button>
-                </div>
+                  {/* Submit Button */}
+                  <div className="flex justify-end space-x-4 pt-4 border-t">
+                    <button
+                      onClick={() => setUploadedMembers([])}
+                      className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-semibold hover:bg-gray-50"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={handleBulkSubmit}
+                      disabled={loading || uploadedMembers.some(m => !m.email)}
+                      className={`px-6 py-3 rounded-lg font-semibold ${
+                        loading || uploadedMembers.some(m => !m.email)
+                          ? "bg-gray-400 cursor-not-allowed"
+                          : "bg-red-700 hover:bg-red-800 text-white"
+                      }`}
+                    >
+                      {loading ? "Processing..." : `✅ Add All ${uploadedMembers.length} Members`}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           )}
