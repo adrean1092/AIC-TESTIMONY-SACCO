@@ -256,8 +256,11 @@ export default function MemberDashboard({ data, onLogout }) {
         {/* Loan Request Form Modal */}
         {showLoanForm && (
           <RequestLoanForm
-            availableLimit={availableLoanLimit}
-            onClose={() => setShowLoanForm(false)}
+            availableLoanLimit={availableLoanLimit}
+            totalLoanLimit={totalLoanLimit}
+            outstandingLoans={outstandingLoans}
+            maxLoan={availableLoanLimit}
+            onCancel={() => setShowLoanForm(false)}
             onSubmit={handleRequestLoan}
           />
         )}
