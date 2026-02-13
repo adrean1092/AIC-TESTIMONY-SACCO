@@ -58,14 +58,40 @@ export default function AddMemberModal({ onClose, onSuccess }) {
         const headers = jsonData[headerRowIndex].map(h => String(h || '').trim());
         console.log("Headers found:", headers);
         
-        const nameIdx    = headers.findIndex(h => h.toUpperCase().includes('NAME') && !h.toUpperCase().includes('NO'));
-        const idIdx      = headers.findIndex(h => h.toUpperCase().includes('ID'));
-        const phoneIdx   = headers.findIndex(h => h.toUpperCase().includes('MOBILE') || h.toUpperCase().includes('PHONE'));
-        const saccoIdx   = headers.findIndex(h => h.toUpperCase().includes('M.') || (h.toUpperCase().includes('NO') && h.toUpperCase().includes('.')));
+        const nameIdx    = headers.findIndex(h => {
+          const upper = h.toUpperCase();
+          return upper.includes('NAME') && !upper.includes('NO');
+        });
+        
+        const idIdx      = headers.findIndex(h => {
+          const upper = h.toUpperCase();
+          // Match "ID NO." but not "M. NO." or "MOBILE NO."
+          return upper.includes('ID') && upper.includes('NO') && !upper.includes('M.') && !upper.includes('MOBILE');
+        });
+        
+        const phoneIdx   = headers.findIndex(h => {
+          const upper = h.toUpperCase();
+          return upper.includes('MOBILE') || upper.includes('PHONE');
+        });
+        
+        const saccoIdx   = headers.findIndex(h => {
+          const upper = h.toUpperCase();
+          // Match "M. NO." or "M.NO." (with or without space)
+          return (upper.includes('M.') || upper.includes('M ')) && upper.includes('NO');
+        });
+        
         const savingsIdx = headers.findIndex(h => h.toUpperCase().includes('SAVINGS'));
         const emailIdx   = headers.findIndex(h => h.toUpperCase().includes('EMAIL'));
         
         console.log("Column indices:", { nameIdx, idIdx, phoneIdx, saccoIdx, savingsIdx, emailIdx });
+        console.log("Column names:", {
+          name: headers[nameIdx],
+          id: headers[idIdx],
+          phone: headers[phoneIdx],
+          sacco: headers[saccoIdx],
+          savings: headers[savingsIdx],
+          email: headers[emailIdx]
+        });
 
         // Non-empty after trimming
         const hasValue = (val) =>
