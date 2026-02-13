@@ -3,7 +3,7 @@ import API from "../api";
 import Reports from "./Reports";
 import DividendsManagement from "./Dividendsmanagement";
 import AddMemberModal from "./AddMemberModal";
-import EditMemberModal from "./EditMemberModal";
+import Editmembermodal from "./Editmembermodal";
 import EditLoanModal from "./EditLoanModal";
 import LoanApprovalModal from "./Loanapprovalmodal";
 
@@ -579,7 +579,7 @@ const AdminDashboard = () => {
 
       {/* Edit Member (details only) */}
       {editingMember && (
-        <EditMemberModal
+        <Editmembermodal
           member={editingMember}
           onClose={() => setEditingMember(null)}
           onSuccess={() => { loadMembers(); setEditingMember(null); }}
