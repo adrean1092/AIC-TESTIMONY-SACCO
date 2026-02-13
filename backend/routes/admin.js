@@ -457,13 +457,20 @@ router.post("/loans/:id/reject", auth, async (req, res) => {
   }
 });
 
-// Record loan repayment
+// Record loan repayment - IMPROVED VERSION with better error handling
 router.post("/loans/:id/repayment", auth, async (req, res) => {
-  if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
   
   const { id } = req.params;
   const { amount } = req.body;
   
+  console.log("=== LOAN REPAYMENT REQUEST ===");
+  console.log("Loan ID:", id);
+  console.log("Payment Amount:", amount);
+  
+  // Validate input
   if (!amount || parseFloat(amount) <= 0) {
     return res.status(400).json({ message: "Invalid repayment amount" });
   }
@@ -473,81 +480,303 @@ router.post("/loans/:id/repayment", auth, async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const loanRes = await client.query("SELECT * FROM loans WHERE id=$1", [id]);
+    // Get loan details with user info
+    const loanRes = await client.query(
+      `SELECT l.*, u.loan_limit, u.id as user_id
+       FROM loans l
+       JOIN users u ON l.user_id = u.id
+       WHERE l.id = $1`,
+      [id]
+    );
+
     if (loanRes.rows.length === 0) {
       await client.query("ROLLBACK");
       return res.status(404).json({ message: "Loan not found" });
     }
 
     const loan = loanRes.rows[0];
+    console.log("Loan Status:", loan.status);
+    console.log("Current Balance:", loan.amount);
+
+    // Validate loan status
+    if (loan.status !== 'APPROVED') {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ 
+        message: `Cannot record payment for ${loan.status} loan. Only APPROVED loans can receive payments.` 
+      });
+    }
+
+    // Parse and validate values
     const repaymentAmount = parseFloat(amount);
-    const currentBalance = parseFloat(loan.amount);
-    const principalAmount = parseFloat(loan.principal_amount || loan.initial_amount);
+    const currentBalance = parseFloat(loan.amount || 0);
+    
+    console.log("Repayment Amount:", repaymentAmount);
+    console.log("Current Balance:", currentBalance);
+
+    // Check if repayment exceeds balance
+    if (repaymentAmount > currentBalance) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ 
+        message: `Repayment amount KES ${repaymentAmount.toLocaleString()} exceeds outstanding balance KES ${currentBalance.toLocaleString()}` 
+      });
+    }
+
+    // Get or calculate principal amount (original loan + processing fee)
+    let principalAmount;
+    if (loan.principal_amount && parseFloat(loan.principal_amount) > 0) {
+      principalAmount = parseFloat(loan.principal_amount);
+    } else if (loan.initial_amount && parseFloat(loan.initial_amount) > 0) {
+      principalAmount = parseFloat(loan.initial_amount);
+    } else {
+      // Fallback: use current amount
+      principalAmount = parseFloat(loan.amount);
+    }
+
+    console.log("Principal Amount:", principalAmount);
+
+    if (principalAmount === 0 || isNaN(principalAmount)) {
+      await client.query("ROLLBACK");
+      return res.status(500).json({ 
+        message: "Invalid loan data: cannot determine principal amount. Please contact administrator." 
+      });
+    }
+
+    // Get current payment tracking
     const currentPrincipalPaid = parseFloat(loan.principal_paid || 0);
     const currentInterestPaid = parseFloat(loan.interest_paid || 0);
-    const monthlyRate = parseFloat(loan.interest_rate) / 100;
+    
+    // Get interest rate (default to 1.045% if missing)
+    let interestRate = parseFloat(loan.interest_rate);
+    if (!interestRate || interestRate === 0 || isNaN(interestRate)) {
+      console.warn("Missing or invalid interest rate, using default 1.045%");
+      interestRate = 1.045;
+    }
+    const monthlyRate = interestRate / 100;
+    
+    // Get repayment period (default to 12 if missing)
+    let repaymentPeriod = parseInt(loan.repayment_period);
+    if (!repaymentPeriod || repaymentPeriod === 0 || isNaN(repaymentPeriod)) {
+      console.warn("Missing or invalid repayment period, using default 12 months");
+      repaymentPeriod = 12;
+    }
 
-    const currentPrincipalBalance = principalAmount - currentPrincipalPaid;
-    const interestPayment = currentPrincipalBalance * monthlyRate;
-    const principalPayment = Math.max(0, repaymentAmount - interestPayment);
+    console.log("Interest Rate:", interestRate + "%");
+    console.log("Monthly Rate:", monthlyRate);
+    console.log("Principal Paid So Far:", currentPrincipalPaid);
+    console.log("Interest Paid So Far:", currentInterestPaid);
 
-    const newPrincipalPaid = currentPrincipalPaid + principalPayment;
-    const newInterestPaid = currentInterestPaid + Math.min(repaymentAmount, interestPayment);
+    // Calculate using reducing balance method
+    // Interest is calculated on remaining principal balance
+    const remainingPrincipal = principalAmount - currentPrincipalPaid;
+    const interestOnBalance = remainingPrincipal * monthlyRate;
+
+    console.log("Remaining Principal:", remainingPrincipal);
+    console.log("Interest on Current Balance:", interestOnBalance);
+
+    // Determine how payment is split between interest and principal
+    let actualInterestPayment = 0;
+    let actualPrincipalPayment = 0;
+
+    if (repaymentAmount <= interestOnBalance) {
+      // Payment only covers interest (partial or full)
+      actualInterestPayment = repaymentAmount;
+      actualPrincipalPayment = 0;
+    } else {
+      // Payment covers all interest and some principal
+      actualInterestPayment = interestOnBalance;
+      actualPrincipalPayment = repaymentAmount - interestOnBalance;
+    }
+
+    console.log("Interest Portion:", actualInterestPayment);
+    console.log("Principal Portion:", actualPrincipalPayment);
+
+    // Calculate new balances
+    const newPrincipalPaid = currentPrincipalPaid + actualPrincipalPayment;
+    const newInterestPaid = currentInterestPaid + actualInterestPayment;
     const newBalance = Math.max(0, currentBalance - repaymentAmount);
+    const newStatus = newBalance === 0 ? 'PAID' : 'APPROVED';
 
+    console.log("New Principal Paid:", newPrincipalPaid);
+    console.log("New Interest Paid:", newInterestPaid);
+    console.log("New Balance:", newBalance);
+    console.log("New Status:", newStatus);
+
+    // Update loan record
     await client.query(
       `UPDATE loans 
-       SET amount=$1, principal_paid=$2, interest_paid=$3, status=$4
-       WHERE id=$5`,
-      [
-        newBalance,
-        newPrincipalPaid,
-        newInterestPaid,
-        newBalance === 0 ? 'PAID' : 'APPROVED',
-        id
-      ]
+       SET amount = $1,
+           principal_paid = $2,
+           interest_paid = $3,
+           status = $4
+       WHERE id = $5`,
+      [newBalance, newPrincipalPaid, newInterestPaid, newStatus, id]
     );
 
+    // Insert repayment record
     await client.query(
-      `INSERT INTO loan_repayments (loan_id, amount, principal_paid, interest_paid)
-       VALUES ($1, $2, $3, $4)`,
-      [id, repaymentAmount, principalPayment, Math.min(repaymentAmount, interestPayment)]
+      `INSERT INTO loan_repayments (loan_id, amount, principal_paid, interest_paid, payment_date)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [id, repaymentAmount, actualPrincipalPayment, actualInterestPayment]
     );
 
-    const userRes = await client.query("SELECT loan_limit FROM users WHERE id=$1", [loan.user_id]);
-    const currentLoanLimit = parseFloat(userRes.rows[0].loan_limit || 0);
-    const newLoanLimit = currentLoanLimit + repaymentAmount;
+    // Update member's loan limit
+    // When principal is paid, available loan limit increases
+    const currentLoanLimit = parseFloat(loan.loan_limit || 0);
+    const newLoanLimit = currentLoanLimit + actualPrincipalPayment;
+
+    console.log("Current Loan Limit:", currentLoanLimit);
+    console.log("New Loan Limit:", newLoanLimit);
+    console.log("Limit Increase:", actualPrincipalPayment);
 
     await client.query(
-      "UPDATE users SET loan_limit=$1 WHERE id=$2",
+      "UPDATE users SET loan_limit = $1 WHERE id = $2",
       [newLoanLimit, loan.user_id]
     );
 
     await client.query("COMMIT");
 
-    const totalInterest = principalAmount * monthlyRate * loan.repayment_period;
+    // Calculate total interest for reference
+    const totalInterest = principalAmount * monthlyRate * repaymentPeriod;
+
+    console.log("=== REPAYMENT SUCCESSFUL ===");
 
     res.json({
       success: true,
+      message: "Payment recorded successfully",
       repayment: {
         amount: parseFloat(repaymentAmount.toFixed(2)),
-        principalPayment: parseFloat(principalPayment.toFixed(2)),
-        interestPayment: parseFloat(Math.min(repaymentAmount, interestPayment).toFixed(2)),
+        principalPayment: parseFloat(actualPrincipalPayment.toFixed(2)),
+        interestPayment: parseFloat(actualInterestPayment.toFixed(2)),
         newBalance: parseFloat(newBalance.toFixed(2)),
+        newStatus: newStatus,
         totalInterestPaid: parseFloat(newInterestPaid.toFixed(2)),
         totalPrincipalPaid: parseFloat(newPrincipalPaid.toFixed(2)),
+        remainingPrincipal: parseFloat((principalAmount - newPrincipalPaid).toFixed(2)),
         totalInterest: parseFloat(totalInterest.toFixed(2)),
-        totalPrincipal: principalAmount
+        totalPrincipal: principalAmount,
+        percentagePaid: parseFloat(((newPrincipalPaid / principalAmount) * 100).toFixed(2))
       },
-      newLoanLimit: newLoanLimit,
+      loanLimit: {
+        previous: currentLoanLimit,
+        new: newLoanLimit,
+        increase: parseFloat(actualPrincipalPayment.toFixed(2))
+      },
       fullyPaid: newBalance === 0
     });
+
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("=== LOAN REPAYMENT ERROR ===");
+    console.error("Error:", err.message);
+    console.error("Stack:", err.stack);
+    
+    res.status(500).json({ 
+      message: "Server error while recording payment",
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   } finally {
     client.release();
+  }
+});
+
+// Get loan payment details (helpful for debugging and admin info)
+router.get("/loans/:id/payment-details", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const { id } = req.params;
+
+  try {
+    // Get loan with payment history
+    const loanRes = await pool.query(
+      `SELECT 
+        l.*,
+        u.full_name,
+        u.email,
+        u.loan_limit
+      FROM loans l
+      JOIN users u ON l.user_id = u.id
+      WHERE l.id = $1`,
+      [id]
+    );
+
+    if (loanRes.rows.length === 0) {
+      return res.status(404).json({ message: "Loan not found" });
+    }
+
+    const loan = loanRes.rows[0];
+
+    // Get payment history
+    const paymentsRes = await pool.query(
+      `SELECT 
+        id,
+        amount,
+        principal_paid,
+        interest_paid,
+        payment_date
+      FROM loan_repayments
+      WHERE loan_id = $1
+      ORDER BY payment_date DESC`,
+      [id]
+    );
+
+    // Calculate loan details
+    const principalAmount = parseFloat(loan.principal_amount || loan.initial_amount || loan.amount || 0);
+    const currentBalance = parseFloat(loan.amount || 0);
+    const principalPaid = parseFloat(loan.principal_paid || 0);
+    const interestPaid = parseFloat(loan.interest_paid || 0);
+    const interestRate = parseFloat(loan.interest_rate || 1.045) / 100;
+    const repaymentPeriod = parseInt(loan.repayment_period || 12);
+
+    const remainingPrincipal = principalAmount - principalPaid;
+    const nextInterestPayment = remainingPrincipal * interestRate;
+    const totalInterest = principalAmount * interestRate * repaymentPeriod;
+    const totalPayments = paymentsRes.rows.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+
+    res.json({
+      loan: {
+        id: loan.id,
+        memberName: loan.full_name,
+        memberEmail: loan.email,
+        status: loan.status,
+        originalAmount: parseFloat(loan.initial_amount || 0),
+        principalAmount: principalAmount,
+        currentBalance: currentBalance,
+        interestRate: loan.interest_rate + "%",
+        monthlyRate: (interestRate * 100).toFixed(3) + "%",
+        repaymentPeriod: repaymentPeriod + " months"
+      },
+      progress: {
+        principalPaid: parseFloat(principalPaid.toFixed(2)),
+        principalRemaining: parseFloat(remainingPrincipal.toFixed(2)),
+        interestPaid: parseFloat(interestPaid.toFixed(2)),
+        totalPaid: parseFloat(totalPayments.toFixed(2)),
+        percentageComplete: parseFloat(((principalPaid / principalAmount) * 100).toFixed(2)) + "%"
+      },
+      nextPayment: {
+        minimumPayment: parseFloat(nextInterestPayment.toFixed(2)),
+        interestPortion: parseFloat(nextInterestPayment.toFixed(2)),
+        recommendedPayment: parseFloat((currentBalance / Math.max(1, repaymentPeriod - paymentsRes.rows.length)).toFixed(2)),
+        payoffAmount: currentBalance
+      },
+      paymentHistory: paymentsRes.rows.map(p => ({
+        id: p.id,
+        amount: parseFloat(p.amount),
+        principalPaid: parseFloat(p.principal_paid),
+        interestPaid: parseFloat(p.interest_paid),
+        paymentDate: p.payment_date
+      })),
+      memberLoanLimit: parseFloat(loan.loan_limit || 0)
+    });
+
+  } catch (err) {
+    console.error("Error fetching payment details:", err);
+    res.status(500).json({ 
+      message: "Server error",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
 
@@ -712,7 +941,8 @@ router.get("/reports/all", auth, async (req, res) => {
         u.loan_limit,
         COALESCE(SUM(s.amount), 0) AS total_savings,
         COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'APPROVED') AS total_approved_loans,
-        COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'APPROVED' AND l.amount > 0), 0) AS outstanding_loans
+        COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'APPROVED' AND l.amount > 0), 0) AS outstanding_loans,
+        COALESCE(SUM(l.initial_amount) FILTER (WHERE l.status = 'APPROVED'), 0) AS total_approved_amount
       FROM users u
       LEFT JOIN savings s ON s.user_id = u.id
       LEFT JOIN loans l ON l.user_id = u.id
@@ -735,6 +965,7 @@ router.get("/reports/all", auth, async (req, res) => {
         const loanLimit = parseFloat(m.loan_limit);
         const outstandingLoans = parseFloat(m.outstanding_loans);
         const availableLoanLimit = Math.max(0, loanLimit - outstandingLoans);
+        const totalApprovedAmount = parseFloat(m.total_approved_amount);
         
         return {
           id: m.id,
@@ -744,7 +975,8 @@ router.get("/reports/all", auth, async (req, res) => {
           totalSavings: totalSavings,
           totalLoans: parseInt(m.total_approved_loans),
           outstandingLoans: outstandingLoans,
-          availableLoanLimit: availableLoanLimit
+          availableLoanLimit: availableLoanLimit,
+          totalApprovedAmount: totalApprovedAmount
         };
       })
     });

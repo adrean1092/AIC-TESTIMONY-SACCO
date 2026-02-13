@@ -6,6 +6,7 @@ import DividendsManagement from "./Dividendsmanagement";
 // ✅ NEW: Import the modal components
 import AddMemberModal from "./AddMemberModal";
 import EditLoanModal from "./EditLoanModal";
+import LoanApprovalModal from "./LoanApprovalModal";
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("members"); // members, dividends, reports
@@ -33,6 +34,9 @@ const AdminDashboard = () => {
   const [showGuarantorsModal, setShowGuarantorsModal] = useState(false);
   const [selectedLoanGuarantors, setSelectedLoanGuarantors] = useState(null);
   const [loadingGuarantors, setLoadingGuarantors] = useState(false);
+
+  // ✅ NEW: Modal state for loan approval
+  const [approvingLoan, setApprovingLoan] = useState(null);
 
   const navigate = useNavigate();
 
@@ -141,16 +145,9 @@ const AdminDashboard = () => {
     }
   };
 
-  const approveLoan = async (loanId) => {
-    try {
-      await API.post(`/loans/${loanId}/approve`);
-      loadLoans();
-      loadMembers();
-      alert("Loan approved successfully!");
-    } catch (error) {
-      console.error("Error approving loan:", error);
-      alert("Failed to approve loan: " + (error.response?.data?.message || error.message));
-    }
+  // ✅ UPDATED: Open approval modal instead of direct approval
+  const openApprovalModal = (loan) => {
+    setApprovingLoan(loan);
   };
 
   const rejectLoan = async (loanId) => {
@@ -172,8 +169,8 @@ const AdminDashboard = () => {
     }
 
     try {
-      const res = await API.post(`/admin/loans/${loanId}/payment`, { 
-        paymentAmount: parseFloat(amount) 
+      const res = await API.post(`/admin/loans/${loanId}/repayment`, { 
+        amount: parseFloat(amount) 
       });
       
       setPaymentResult(res.data);
@@ -528,7 +525,7 @@ const AdminDashboard = () => {
                             {l.status === "PENDING" && (
                               <>
                                 <button 
-                                  onClick={() => approveLoan(l.id)} 
+                                  onClick={() => openApprovalModal(l)} 
                                   className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition"
                                 >
                                   Approve
@@ -569,7 +566,7 @@ const AdminDashboard = () => {
               <div className="bg-gray-50 p-3 rounded">
                 <p className="text-sm text-gray-600">Amount Paid</p>
                 <p className="text-xl font-bold text-gray-900">
-                  KES {paymentResult.paid?.toLocaleString()}
+                  KES {paymentResult.repayment?.amount?.toLocaleString()}
                 </p>
               </div>
               
@@ -577,13 +574,13 @@ const AdminDashboard = () => {
                 <div className="bg-blue-50 p-3 rounded">
                   <p className="text-xs text-gray-600">Interest Paid</p>
                   <p className="text-sm font-bold text-blue-700">
-                    KES {paymentResult.breakdown?.interestPaid?.toLocaleString()}
+                    KES {paymentResult.repayment?.interestPayment?.toLocaleString()}
                   </p>
                 </div>
                 <div className="bg-purple-50 p-3 rounded">
                   <p className="text-xs text-gray-600">Principal Paid</p>
                   <p className="text-sm font-bold text-purple-700">
-                    KES {paymentResult.breakdown?.principalPaid?.toLocaleString()}
+                    KES {paymentResult.repayment?.principalPayment?.toLocaleString()}
                   </p>
                 </div>
               </div>
@@ -591,7 +588,14 @@ const AdminDashboard = () => {
               <div className="bg-green-50 p-3 rounded">
                 <p className="text-sm text-gray-600">Remaining Balance</p>
                 <p className="text-xl font-bold text-green-700">
-                  KES {paymentResult.remaining?.toLocaleString()}
+                  KES {paymentResult.repayment?.newBalance?.toLocaleString()}
+                </p>
+              </div>
+
+              <div className="bg-indigo-50 p-3 rounded">
+                <p className="text-sm text-gray-600">New Loan Limit</p>
+                <p className="text-xl font-bold text-indigo-700">
+                  KES {paymentResult.newLoanLimit?.toLocaleString()}
                 </p>
               </div>
               
@@ -631,6 +635,18 @@ const AdminDashboard = () => {
           onSuccess={() => {
             loadLoans();
             loadMembers(); // Refresh members too for updated loan limits
+          }}
+        />
+      )}
+
+      {/* ✅ NEW: Loan Approval Modal */}
+      {approvingLoan && (
+        <LoanApprovalModal
+          loan={approvingLoan}
+          onClose={() => setApprovingLoan(null)}
+          onSuccess={() => {
+            loadLoans();
+            loadMembers();
           }}
         />
       )}
