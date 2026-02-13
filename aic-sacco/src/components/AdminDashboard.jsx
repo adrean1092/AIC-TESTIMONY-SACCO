@@ -50,8 +50,8 @@ const AdminDashboard = () => {
 
   const loadLoans = async () => {
     try {
-      const res = await API.get("/admin/loans");
-      setLoans(res.data);
+      const res = await API.get("/loans");
+      setLoans(res.data.loans || res.data);
     } catch (error) {
       console.error("Error loading loans:", error);
       alert("Failed to load loans. Please check your authentication.");
@@ -122,7 +122,7 @@ const AdminDashboard = () => {
 
   const approveLoan = async (loanId) => {
     try {
-      await API.put(`/admin/loans/${loanId}/approve`);
+      await API.post(`/loans/${loanId}/approve`);
       loadLoans();
       loadMembers();
       alert("Loan approved successfully!");
@@ -134,7 +134,7 @@ const AdminDashboard = () => {
 
   const rejectLoan = async (loanId) => {
     try {
-      await API.put(`/admin/loans/${loanId}/reject`);
+      await API.post(`/loans/${loanId}/reject`);
       loadLoans();
       alert("Loan rejected successfully!");
     } catch (error) {
