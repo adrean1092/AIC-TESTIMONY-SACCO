@@ -924,13 +924,16 @@ router.get("/reports/all", auth, async (req, res) => {
     );
     
     const loansRes = await pool.query(
-      `SELECT COALESCE(SUM(initial_amount), 0) AS total, COUNT(*) AS count 
+      `SELECT 
+        COALESCE(SUM(initial_amount), 0) AS total_disbursed,
+        COALESCE(SUM(CASE WHEN status='APPROVED' THEN amount ELSE 0 END), 0) AS total_outstanding,
+        COUNT(*) AS count 
        FROM loans ${loansDateFilter}`,
       loansParams
     );
     
     const activeLoansRes = await pool.query(
-      "SELECT COUNT(*) FROM loans WHERE status='APPROVED' AND amount > 0"
+      "SELECT COUNT(*) FROM loans WHERE status='APPROVED'"
     );
     
     const memberBreakdownRes = await pool.query(`
@@ -956,7 +959,8 @@ router.get("/reports/all", auth, async (req, res) => {
       summary: {
         totalMembers: parseInt(membersRes.rows[0].count),
         totalSavings: parseFloat(totalSavingsRes.rows[0].total),
-        totalLoans: parseFloat(loansRes.rows[0].total),
+        totalLoans: parseFloat(loansRes.rows[0].total_outstanding),
+        totalDisbursed: parseFloat(loansRes.rows[0].total_disbursed),
         loansCount: parseInt(loansRes.rows[0].count),
         activeLoans: parseInt(activeLoansRes.rows[0].count)
       },

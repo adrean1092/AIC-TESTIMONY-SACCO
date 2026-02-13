@@ -264,10 +264,15 @@ export default function Reports() {
                   </p>
                 </div>
                 <div className="bg-red-50 p-4 rounded-lg summary-card">
-                  <p className="text-gray-600 text-sm">Total Loans</p>
+                  <p className="text-gray-600 text-sm">Outstanding Loans</p>
                   <p className="text-2xl font-bold text-red-700">
                     KES {reportData.summary.totalLoans.toLocaleString()}
                   </p>
+                  {reportData.summary.totalDisbursed > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Total disbursed: KES {reportData.summary.totalDisbursed.toLocaleString()}
+                    </p>
+                  )}
                 </div>
                 <div className="bg-purple-50 p-4 rounded-lg summary-card">
                   <p className="text-gray-600 text-sm">Active Loans</p>
