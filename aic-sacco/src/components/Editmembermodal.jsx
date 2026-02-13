@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import API from "../api";
 
-export default function EditMemberModal({ member, onClose, onSuccess }) {
+export default function Editmembermodal({ member, onClose, onSuccess }) {
   const [memberData, setMemberData] = useState({
     full_name: "",
     id_number: "",
