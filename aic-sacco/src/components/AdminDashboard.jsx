@@ -595,8 +595,13 @@ const AdminDashboard = () => {
               <div className="bg-indigo-50 p-3 rounded">
                 <p className="text-sm text-gray-600">New Loan Limit</p>
                 <p className="text-xl font-bold text-indigo-700">
-                  KES {paymentResult.newLoanLimit?.toLocaleString()}
+                  KES {paymentResult.loanLimit?.new?.toLocaleString()}
                 </p>
+                {paymentResult.loanLimit?.increase > 0 && (
+                  <p className="text-xs text-indigo-500 mt-1">
+                    ↑ KES {paymentResult.loanLimit?.increase?.toLocaleString()} from principal paid
+                  </p>
+                )}
               </div>
               
               {paymentResult.fullyPaid && (
