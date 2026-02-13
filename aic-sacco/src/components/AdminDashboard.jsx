@@ -28,6 +28,11 @@ const AdminDashboard = () => {
   // ✅ NEW: Modal state for Add Member and Edit Loan
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [editingLoan, setEditingLoan] = useState(null);
+  
+  // ✅ NEW: Modal state for viewing guarantors
+  const [showGuarantorsModal, setShowGuarantorsModal] = useState(false);
+  const [selectedLoanGuarantors, setSelectedLoanGuarantors] = useState(null);
+  const [loadingGuarantors, setLoadingGuarantors] = useState(false);
 
   const navigate = useNavigate();
 
@@ -55,6 +60,22 @@ const AdminDashboard = () => {
     } catch (error) {
       console.error("Error loading loans:", error);
       alert("Failed to load loans. Please check your authentication.");
+    }
+  };
+
+  // ✅ NEW: Function to load and view guarantors for a specific loan
+  const viewGuarantors = async (loanId) => {
+    setLoadingGuarantors(true);
+    setShowGuarantorsModal(true);
+    try {
+      const res = await API.get(`/loans/${loanId}`);
+      setSelectedLoanGuarantors(res.data);
+    } catch (error) {
+      console.error("Error loading guarantors:", error);
+      alert("Failed to load guarantors");
+      setShowGuarantorsModal(false);
+    } finally {
+      setLoadingGuarantors(false);
     }
   };
 
@@ -459,13 +480,18 @@ const AdminDashboard = () => {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
-                          {l.created_at ? new Date(l.created_at).toLocaleDateString() : 'N/A'}
+                          {l.createdAt ? new Date(l.createdAt).toLocaleDateString() : 'N/A'}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">
-                          <div className="space-y-1">
-                            <div className="font-semibold">{l.guarantorName}</div>
-                            <div className="text-xs text-gray-600">{l.guarantorEmail}</div>
-                          </div>
+                          <button
+                            onClick={() => viewGuarantors(l.id)}
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition flex items-center gap-1"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                            View ({l.guarantorCounts ? (l.guarantorCounts.members + l.guarantorCounts.churchOfficials + l.guarantorCounts.witnesses) : 0})
+                          </button>
                         </td>
                         <td className="px-4 py-3 text-sm">
                           {l.status === "APPROVED" && currentBalance > 0 && (
@@ -607,6 +633,156 @@ const AdminDashboard = () => {
             loadMembers(); // Refresh members too for updated loan limits
           }}
         />
+      )}
+
+      {/* ✅ NEW: Guarantors Modal */}
+      {showGuarantorsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="bg-blue-700 text-white p-6 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">Loan Guarantors</h2>
+                {selectedLoanGuarantors && (
+                  <p className="text-blue-100 text-sm mt-1">
+                    Member: {selectedLoanGuarantors.loan.memberName} | 
+                    Loan Amount: KES {selectedLoanGuarantors.loan.amount?.toLocaleString()}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setShowGuarantorsModal(false);
+                  setSelectedLoanGuarantors(null);
+                }}
+                className="text-white hover:text-blue-200 text-3xl font-bold leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-100px)]">
+              {loadingGuarantors && (
+                <div className="text-center py-8">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-700"></div>
+                  <p className="mt-2 text-gray-600">Loading guarantors...</p>
+                </div>
+              )}
+
+              {!loadingGuarantors && selectedLoanGuarantors && (
+                <div className="space-y-6">
+                  {/* SACCO Member Guarantors */}
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                    <h3 className="text-lg font-bold text-green-900 mb-4 flex items-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+                      </svg>
+                      SACCO Member Guarantors ({selectedLoanGuarantors.guarantors.members?.length || 0})
+                    </h3>
+                    {selectedLoanGuarantors.guarantors.members?.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {selectedLoanGuarantors.guarantors.members.map((g, idx) => (
+                          <div key={g.id} className="bg-white p-4 rounded-lg shadow-sm border border-green-200">
+                            <div className="font-semibold text-green-900 mb-2">Guarantor {idx + 1}</div>
+                            <div className="space-y-1 text-sm">
+                              <div><span className="font-semibold">Name:</span> {g.name}</div>
+                              <div><span className="font-semibold">ID:</span> {g.idNumber}</div>
+                              <div><span className="font-semibold">Phone:</span> {g.phone}</div>
+                              <div><span className="font-semibold">Email:</span> {g.email}</div>
+                              <div><span className="font-semibold">Shares:</span> KES {g.shares?.toLocaleString()}</div>
+                              <div className="text-xs text-gray-600 mt-2">
+                                {g.county}, {g.location}, {g.subLocation}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-gray-600">No SACCO member guarantors</p>
+                    )}
+                  </div>
+
+                  {/* Church Officials */}
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-6">
+                    <h3 className="text-lg font-bold text-purple-900 mb-4 flex items-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                      </svg>
+                      Church Council Officials ({selectedLoanGuarantors.guarantors.churchOfficials?.length || 0})
+                    </h3>
+                    {selectedLoanGuarantors.guarantors.churchOfficials?.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {selectedLoanGuarantors.guarantors.churchOfficials.map((g, idx) => (
+                          <div key={g.id} className="bg-white p-4 rounded-lg shadow-sm border border-purple-200">
+                            <div className="font-semibold text-purple-900 mb-2">Official {idx + 1}</div>
+                            <div className="space-y-1 text-sm">
+                              <div><span className="font-semibold">Name:</span> {g.name}</div>
+                              <div><span className="font-semibold">Position:</span> {g.position}</div>
+                              <div><span className="font-semibold">Church:</span> {g.localChurch}</div>
+                              <div><span className="font-semibold">ID:</span> {g.idNumber}</div>
+                              <div><span className="font-semibold">Phone:</span> {g.phone}</div>
+                              <div><span className="font-semibold">Email:</span> {g.email}</div>
+                              <div className="text-xs text-gray-600 mt-2">
+                                {g.county}, {g.location}, {g.subLocation}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-gray-600">No church officials</p>
+                    )}
+                  </div>
+
+                  {/* Witnesses */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                    <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
+                      </svg>
+                      Witnesses / Next of Kin ({selectedLoanGuarantors.guarantors.witnesses?.length || 0})
+                    </h3>
+                    {selectedLoanGuarantors.guarantors.witnesses?.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {selectedLoanGuarantors.guarantors.witnesses.map((g, idx) => (
+                          <div key={g.id} className="bg-white p-4 rounded-lg shadow-sm border border-blue-200">
+                            <div className="font-semibold text-blue-900 mb-2">Witness {idx + 1}</div>
+                            <div className="space-y-1 text-sm">
+                              <div><span className="font-semibold">Name:</span> {g.name}</div>
+                              <div><span className="font-semibold">ID:</span> {g.idNumber}</div>
+                              <div><span className="font-semibold">Phone:</span> {g.phone}</div>
+                              <div><span className="font-semibold">Email:</span> {g.email}</div>
+                              <div><span className="font-semibold">Work:</span> {g.placeOfWork}</div>
+                              <div className="text-xs text-gray-600 mt-2">
+                                {g.county}, {g.location}, {g.subLocation}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-gray-600">No witnesses</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="bg-gray-50 px-6 py-4 border-t flex justify-end">
+              <button
+                onClick={() => {
+                  setShowGuarantorsModal(false);
+                  setSelectedLoanGuarantors(null);
+                }}
+                className="px-6 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
