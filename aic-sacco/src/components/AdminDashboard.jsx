@@ -6,7 +6,7 @@ import DividendsManagement from "./Dividendsmanagement";
 // ✅ NEW: Import the modal components
 import AddMemberModal from "./AddMemberModal";
 import EditLoanModal from "./EditLoanModal";
-import LoanApprovalModal from "./LoanApprovalModal";
+import LoanApprovalModal from "./Loanapprovalmodal";
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("members"); // members, dividends, reports
