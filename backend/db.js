@@ -1,20 +1,16 @@
 const { Pool } = require("pg");
 require("dotenv").config();
 
-// Render PostgreSQL requires SSL, local development doesn't
-const isProduction = process.env.NODE_ENV === 'production';
-
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || undefined,
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT) || 5432,
   user: process.env.DB_USER,
-  password: String(process.env.DB_PASSWORD),
+  password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  ssl: isProduction ? { rejectUnauthorized: false } : false,
-  max: 20, // Maximum number of connections in pool
+  ssl: { rejectUnauthorized: false }, // FORCE SSL
+  max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 5000, // increased for remote DB
 });
 
 pool.on("connect", () => {
@@ -26,8 +22,8 @@ pool.on("error", (err) => {
   process.exit(1);
 });
 
-// Test connection on startup
-pool.query('SELECT NOW()', (err, res) => {
+// Test connection immediately
+pool.query("SELECT NOW()", (err, res) => {
   if (err) {
     console.error("❌ Database connection test failed:", err.message);
   } else {
