@@ -860,7 +860,12 @@ router.get("/reports/all", auth, async (req, res) => {
       LEFT JOIN loans l ON l.user_id = u.id
       WHERE u.role = 'MEMBER'
       GROUP BY u.id, u.full_name, u.sacco_number, u.loan_limit
-      ORDER BY u.full_name
+      ORDER BY 
+        CASE 
+          WHEN u.sacco_number ~ '^[0-9]+$' THEN u.sacco_number::INTEGER 
+          ELSE 999999 
+        END ASC,
+        u.sacco_number ASC
     `);
     
     res.json({
