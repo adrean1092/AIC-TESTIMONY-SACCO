@@ -1,16 +1,13 @@
 const { Pool } = require("pg");
 require("dotenv").config();
 
+// Use DATABASE_URL if available (Render default), otherwise use individual variables
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT) || 5432,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl: { rejectUnauthorized: false }, // FORCE SSL
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false, // Force SSL for remote DB
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000, // increased for remote DB
+  connectionTimeoutMillis: 10000, // Increased for remote DB
 });
 
 pool.on("connect", () => {
@@ -27,7 +24,7 @@ pool.query("SELECT NOW()", (err, res) => {
   if (err) {
     console.error("❌ Database connection test failed:", err.message);
   } else {
-    console.log("✅ Database connection test successful");
+    console.log("✅ Database connection test successful at:", res.rows[0].now);
   }
 });
 
