@@ -24,7 +24,12 @@ router.get("/members", auth, async (req, res) => {
       FROM users u
       LEFT JOIN savings s ON s.user_id = u.id
       GROUP BY u.id, u.full_name, u.id_number, u.email, u.phone, u.role, u.sacco_number, u.loan_limit
-      ORDER BY u.sacco_number ASC NULLS LAST
+      ORDER BY 
+        CASE 
+          WHEN u.sacco_number ~ '^[0-9]+$' THEN u.sacco_number::INTEGER 
+          ELSE 999999 
+        END ASC,
+        u.sacco_number ASC
     `);
     res.json(members.rows);
   } catch (err) {
