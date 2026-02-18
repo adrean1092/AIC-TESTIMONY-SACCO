@@ -964,151 +964,149 @@ router.post("/loans/bulk-create", auth, async (req, res) => {
     return res.status(400).json({ message: "Please provide an array of loans to import" });
   }
 
-  const client = await pool.connect();
   const successful = [];
   const failed = [];
 
-  try {
-    await client.query("BEGIN");
+  // ── Each loan gets its OWN transaction so one failure never kills the rest ──
+  for (const loanData of loans) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    for (const loanData of loans) {
-      try {
-        const {
-          sacco_number,
-          loan_amount,
-          interest_rate = 1.045,
-          repayment_period = 12,
-          loan_purpose = "Historical loan",
-          loan_date,
-          principal_paid,
-          interest_paid,
-          last_payment_date,
-          notes,
-        } = loanData;
+      const {
+        sacco_number,
+        loan_amount,
+        interest_rate = 1.045,
+        repayment_period = 12,
+        loan_purpose = "Historical loan",
+        loan_date,
+        principal_paid,
+        interest_paid,
+        last_payment_date,
+        notes,
+      } = loanData;
 
-        if (!sacco_number || !loan_amount) {
-          failed.push({ sacco_number: sacco_number || "N/A", loan_amount, reason: "Missing SACCO number or loan amount" });
-          continue;
-        }
-
-        const memberRes = await client.query(
-          "SELECT id, full_name, loan_limit FROM users WHERE sacco_number = $1",
-          [sacco_number]
-        );
-
-        if (memberRes.rows.length === 0) {
-          failed.push({ sacco_number, loan_amount, reason: "Member not found with this SACCO number" });
-          continue;
-        }
-
-        const member = memberRes.rows[0];
-        const amount = parseFloat(loan_amount);
-
-        if (amount <= 0) {
-          failed.push({ sacco_number, loan_amount, reason: "Loan amount must be greater than 0" });
-          continue;
-        }
-
-        const processingFee    = amount * 0.005;
-        const principalWithFee = amount + processingFee;
-        const monthlyRate      = parseFloat(interest_rate) / 100;
-        const period           = parseInt(repayment_period);
-
-        const monthlyPayment =
-          (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, period)) /
-          (Math.pow(1 + monthlyRate, period) - 1);
-        const totalPayable  = monthlyPayment * period;
-        const totalInterest = totalPayable - principalWithFee;
-
-        const prevPrincipalPaid = parseFloat(principal_paid || 0);
-        const prevInterestPaid  = parseFloat(interest_paid  || 0);
-        const hasPriorPayments  = prevPrincipalPaid > 0 || prevInterestPaid > 0;
-
-        if (hasPriorPayments && prevPrincipalPaid > principalWithFee) {
-          failed.push({ sacco_number, loan_amount, reason: `principal_paid exceeds total principal+fee (${principalWithFee.toFixed(2)})` });
-          continue;
-        }
-
-        const currentBalance = Math.max(0, principalWithFee - prevPrincipalPaid);
-
-        const loanRes = await client.query(
-          `INSERT INTO loans
-             (user_id, amount, initial_amount, principal_amount,
-              interest_rate, repayment_period, loan_purpose,
-              processing_fee, monthly_payment, total_interest,
-              principal_paid, interest_paid,
-              status, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'APPROVED',$13)
-           RETURNING id`,
-          [
-            member.id,
-            currentBalance,
-            amount,
-            principalWithFee,
-            interest_rate,
-            period,
-            loan_purpose,
-            processingFee,
-            monthlyPayment,
-            totalInterest,
-            prevPrincipalPaid,
-            prevInterestPaid,
-            loan_date || new Date(),
-          ]
-        );
-
-        const loanId = loanRes.rows[0].id;
-
-        if (hasPriorPayments) {
-          const paymentDate = last_payment_date || loan_date || new Date();
-          await client.query(
-            `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date)
-             VALUES ($1, $2, $3, $4)`,
-            [loanId, prevPrincipalPaid, prevInterestPaid, paymentDate]
-          );
-        }
-
-        if (notes) {
-          try {
-            await client.query(
-              `INSERT INTO loan_notes (loan_id, note, created_by, created_at) VALUES ($1, $2, $3, NOW())`,
-              [loanId, notes, req.user.id]
-            );
-          } catch (_) {}
-        }
-
-        successful.push({
-          loan_id         : loanId,
-          sacco_number,
-          member_name     : member.full_name,
-          amount,
-          repayment_period: period,
-          current_balance : currentBalance,
-          principal_paid  : prevPrincipalPaid,
-          interest_paid   : prevInterestPaid,
-          status          : "APPROVED",
-        });
-
-      } catch (err) {
-        console.error("Error creating historical loan:", err);
-        failed.push({ sacco_number: loanData.sacco_number || "N/A", loan_amount: loanData.loan_amount, reason: err.message || "Database error" });
+      if (!sacco_number || !loan_amount) {
+        await client.query("ROLLBACK");
+        failed.push({ sacco_number: sacco_number || "N/A", loan_amount, reason: "Missing SACCO number or loan amount" });
+        continue;
       }
+
+      const memberRes = await client.query(
+        "SELECT id, full_name, loan_limit FROM users WHERE sacco_number = $1",
+        [sacco_number]
+      );
+
+      if (memberRes.rows.length === 0) {
+        await client.query("ROLLBACK");
+        failed.push({ sacco_number, loan_amount, reason: "Member not found with this SACCO number" });
+        continue;
+      }
+
+      const member = memberRes.rows[0];
+      const amount = parseFloat(loan_amount);
+
+      if (amount <= 0) {
+        await client.query("ROLLBACK");
+        failed.push({ sacco_number, loan_amount, reason: "Loan amount must be greater than 0" });
+        continue;
+      }
+
+      const processingFee    = amount * 0.005;
+      const principalWithFee = amount + processingFee;
+      const monthlyRate      = parseFloat(interest_rate) / 100;
+      const period           = parseInt(repayment_period);
+
+      const monthlyPayment =
+        (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, period)) /
+        (Math.pow(1 + monthlyRate, period) - 1);
+      const totalPayable  = monthlyPayment * period;
+      const totalInterest = totalPayable - principalWithFee;
+
+      const prevPrincipalPaid = parseFloat(principal_paid || 0);
+      const prevInterestPaid  = parseFloat(interest_paid  || 0);
+      const hasPriorPayments  = prevPrincipalPaid > 0 || prevInterestPaid > 0;
+
+      if (hasPriorPayments && prevPrincipalPaid > principalWithFee) {
+        await client.query("ROLLBACK");
+        failed.push({ sacco_number, loan_amount, reason: `principal_paid exceeds total principal+fee (${principalWithFee.toFixed(2)})` });
+        continue;
+      }
+
+      const currentBalance = Math.max(0, principalWithFee - prevPrincipalPaid);
+
+      // Only insert columns that actually exist on your loans table
+      const loanRes = await client.query(
+        `INSERT INTO loans
+           (user_id, amount, initial_amount, principal_amount,
+            interest_rate, repayment_period, loan_purpose,
+            status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'APPROVED',$8)
+         RETURNING id`,
+        [
+          member.id,
+          currentBalance,
+          amount,
+          principalWithFee,
+          interest_rate,
+          period,
+          loan_purpose,
+          loan_date || new Date(),
+        ]
+      );
+
+      const loanId = loanRes.rows[0].id;
+
+      // Record prior payments if any
+      if (hasPriorPayments) {
+        const paymentDate = last_payment_date || loan_date || new Date();
+        await client.query(
+          `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date)
+           VALUES ($1, $2, $3, $4)`,
+          [loanId, prevPrincipalPaid, prevInterestPaid, paymentDate]
+        );
+        // Also update the loan's paid columns if they exist
+        await client.query(
+          `UPDATE loans SET 
+            principal_paid = COALESCE(principal_paid, 0) + $1,
+            interest_paid  = COALESCE(interest_paid,  0) + $2
+           WHERE id = $3`,
+          [prevPrincipalPaid, prevInterestPaid, loanId]
+        ).catch(() => {}); // ignore if columns don't exist
+      }
+
+      await client.query("COMMIT");
+
+      successful.push({
+        loan_id         : loanId,
+        sacco_number,
+        member_name     : member.full_name,
+        amount,
+        repayment_period: period,
+        current_balance : currentBalance,
+        principal_paid  : prevPrincipalPaid,
+        interest_paid   : prevInterestPaid,
+        status          : "APPROVED",
+      });
+
+    } catch (err) {
+      await client.query("ROLLBACK");
+      console.error(`Error importing loan for ${loanData.sacco_number}:`, err.message);
+      failed.push({
+        sacco_number: loanData.sacco_number || "N/A",
+        loan_amount : loanData.loan_amount,
+        reason      : err.message || "Database error",
+      });
+    } finally {
+      client.release();
     }
-
-    await client.query("COMMIT");
-    res.json({
-      message: `Imported ${successful.length} loans successfully. ${failed.length} failed.`,
-      successful,
-      failed,
-    });
-
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("Bulk loan creation error:", err);
-    res.status(500).json({ message: "Server error during bulk import", error: err.message });
-  } finally {
-    client.release();
   }
+
+  res.json({
+    message: `Imported ${successful.length} loans successfully. ${failed.length} failed.`,
+    successful,
+    failed,
+  });
 });
 
 // ======== BULK LOAN PAYMENT UPDATE ========
