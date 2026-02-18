@@ -1037,8 +1037,8 @@ router.post("/loans/bulk-create", auth, async (req, res) => {
               interest_rate, repayment_period, loan_purpose,
               processing_fee, monthly_payment, total_interest,
               principal_paid, interest_paid,
-              status, created_at, approved_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'APPROVED',$13,$13)
+              status, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'APPROVED',$13)
            RETURNING id`,
           [
             member.id,
