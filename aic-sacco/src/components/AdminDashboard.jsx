@@ -6,7 +6,7 @@ import AddMemberModal from "./AddMemberModal";
 import Editmembermodal from "./Editmembermodal";
 import EditLoanModal from "./EditLoanModal";
 import LoanApprovalModal from "./Loanapprovalmodal";
-import BulkLoanPaymentUpload from "./BulkLoanPaymentUpload";
+import Bulkloanpaymentupload from "./Bulkloanpaymentupload";
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("members");
@@ -695,7 +695,7 @@ const AdminDashboard = () => {
       )}
       {/* Bulk Payment Upload */}
       {showBulkUpload && (
-        <BulkLoanPaymentUpload
+        <Bulkloanpaymentupload
           onClose={() => setShowBulkUpload(false)}
           onSuccess={() => { setShowBulkUpload(false); loadLoans(); }}
         />
