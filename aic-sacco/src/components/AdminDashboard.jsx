@@ -6,6 +6,7 @@ import AddMemberModal from "./AddMemberModal";
 import Editmembermodal from "./Editmembermodal";
 import EditLoanModal from "./EditLoanModal";
 import LoanApprovalModal from "./Loanapprovalmodal";
+import BulkLoanPaymentUpload from "./BulkLoanPaymentUpload";
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("members");
@@ -22,6 +23,7 @@ const AdminDashboard = () => {
   const [showGuarantorsModal, setShowGuarantorsModal] = useState(false);
   const [selectedLoanGuarantors, setSelectedLoanGuarantors] = useState(null);
   const [loadingGuarantors, setLoadingGuarantors] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
 
   // Savings state
   const [savingsAmount, setSavingsAmount] = useState({});
@@ -404,6 +406,12 @@ const AdminDashboard = () => {
                 </p>
               </div>
               <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowBulkUpload(true)}
+                  className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition whitespace-nowrap"
+                >
+                  📤 Bulk Payment Upload
+                </button>
                 <input
                   type="text"
                   placeholder="Search member..."
@@ -684,6 +692,13 @@ const AdminDashboard = () => {
             </div>
           </div>
         </div>
+      )}
+      {/* Bulk Payment Upload */}
+      {showBulkUpload && (
+        <BulkLoanPaymentUpload
+          onClose={() => setShowBulkUpload(false)}
+          onSuccess={() => { setShowBulkUpload(false); loadLoans(); }}
+        />
       )}
     </div>
   );

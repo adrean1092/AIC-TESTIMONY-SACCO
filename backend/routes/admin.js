@@ -904,4 +904,140 @@ router.get("/reports/all", auth, async (req, res) => {
   }
 });
 
+// ======== BULK LOAN PAYMENT UPDATE ========
+
+// POST /api/admin/loans/bulk-payment-update
+router.post("/loans/bulk-payment-update", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+
+  const { payments } = req.body;
+
+  if (!payments || !Array.isArray(payments) || payments.length === 0) {
+    return res.status(400).json({ message: "payments array is required" });
+  }
+
+  const results = { success: [], failed: [] };
+
+  for (const entry of payments) {
+    const { loan_id, sacco_number, payment_amount, principal_paid, interest_paid, payment_date, notes } = entry;
+
+    if (!loan_id || !payment_date) {
+      results.failed.push({ loan_id, sacco_number, reason: "loan_id and payment_date are required" });
+      continue;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Fetch the loan
+      const loanRes = await client.query(
+        `SELECT l.*, u.sacco_number AS member_sacco
+         FROM loans l JOIN users u ON l.user_id = u.id
+         WHERE l.id = $1`,
+        [loan_id]
+      );
+
+      if (loanRes.rows.length === 0) {
+        await client.query("ROLLBACK");
+        results.failed.push({ loan_id, sacco_number, reason: "Loan not found" });
+        continue;
+      }
+
+      const loan = loanRes.rows[0];
+
+      if (loan.status !== "APPROVED") {
+        await client.query("ROLLBACK");
+        results.failed.push({ loan_id, sacco_number, reason: "Loan is not in APPROVED status" });
+        continue;
+      }
+
+      const currentBalance = parseFloat(loan.amount);
+
+      let principalPmt, interestPmt;
+
+      if (payment_amount && !principal_paid && !interest_paid) {
+        // Auto-split: interest first, then principal
+        const totalPmt = parseFloat(payment_amount);
+        if (totalPmt <= 0) {
+          await client.query("ROLLBACK");
+          results.failed.push({ loan_id, sacco_number, reason: "payment_amount must be > 0" });
+          continue;
+        }
+        const monthlyInterest = currentBalance * (parseFloat(loan.interest_rate) / 100);
+        interestPmt = Math.min(monthlyInterest, totalPmt);
+        principalPmt = totalPmt - interestPmt;
+      } else {
+        principalPmt = parseFloat(principal_paid) || 0;
+        interestPmt = parseFloat(interest_paid) || 0;
+      }
+
+      if (principalPmt + interestPmt <= 0) {
+        await client.query("ROLLBACK");
+        results.failed.push({ loan_id, sacco_number, reason: "Total payment must be > 0" });
+        continue;
+      }
+
+      const newBalance = currentBalance - principalPmt;
+      if (newBalance < 0) {
+        await client.query("ROLLBACK");
+        results.failed.push({ loan_id, sacco_number, reason: `Principal payment (${principalPmt}) exceeds balance (${currentBalance})` });
+        continue;
+      }
+
+      // Update loan
+      await client.query(
+        `UPDATE loans
+         SET amount = $1,
+             principal_paid = COALESCE(principal_paid, 0) + $2,
+             interest_paid  = COALESCE(interest_paid,  0) + $3
+         WHERE id = $4`,
+        [newBalance, principalPmt, interestPmt, loan_id]
+      );
+
+      // Insert payment record
+      await client.query(
+        `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date)
+         VALUES ($1, $2, $3, $4)`,
+        [loan_id, principalPmt, interestPmt, payment_date]
+      );
+
+      await client.query("COMMIT");
+
+      results.success.push({
+        loan_id,
+        sacco_number: loan.member_sacco,
+        principalPaid: principalPmt,
+        interestPaid: interestPmt,
+        newBalance,
+        paymentDate: payment_date,
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      console.error(`Bulk payment error for loan ${loan_id}:`, err.message);
+      results.failed.push({ loan_id, sacco_number, reason: err.message });
+    } finally {
+      client.release();
+    }
+  }
+
+  res.json({
+    message: `Processed ${payments.length} payments: ${results.success.length} succeeded, ${results.failed.length} failed`,
+    results,
+  });
+});
+
+// GET /api/admin/loans/bulk-update-template — returns CSV column headers
+router.get("/loans/bulk-update-template", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+  const csv = [
+    "sacco_number,loan_id,payment_amount,payment_date,notes",
+    "SACCO-0001,123,5000,2024-01-15,January payment",
+    "SACCO-0002,124,8000,2024-01-15,January payment",
+  ].join("\n");
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", "attachment; filename=loan_payment_template.csv");
+  res.send(csv);
+});
+
 module.exports = router;
