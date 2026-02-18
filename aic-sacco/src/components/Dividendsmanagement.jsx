@@ -1,499 +1,352 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import API from "../api";
 
-export default function DividendsManagement() {
-  const [activeView, setActiveView] = useState("declarations"); // declarations, declare-new, view-details
-  const [declarations, setDeclarations] = useState([]);
-  const [selectedDeclaration, setSelectedDeclaration] = useState(null);
-  const [allocations, setAllocations] = useState([]);
+// CSV parser (handles quoted fields)
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
+  return lines.slice(1).map((line) => {
+    const values = [];
+    let cur = "", inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; continue; }
+      if (ch === "," && !inQ) { values.push(cur.trim()); cur = ""; }
+      else cur += ch;
+    }
+    values.push(cur.trim());
+    return headers.reduce((obj, h, i) => { obj[h] = values[i] ?? ""; return obj; }, {});
+  }).filter((row) => Object.values(row).some((v) => v !== ""));
+}
+
+const BulkLoanUpload = ({ onClose, onSuccess }) => {
+  const [step, setStep] = useState("upload"); // upload | preview | result
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  
-  // Form state for new declaration
-  const [newDeclaration, setNewDeclaration] = useState({
-    financialYear: new Date().getFullYear(),
-    dividendRate: "",
-    notes: ""
-  });
+  const [result, setResult] = useState(null);
+  const fileRef = useRef();
 
-  useEffect(() => {
-    loadDeclarations();
-  }, []);
-
-  const loadDeclarations = async () => {
-    setLoading(true);
-    try {
-      const res = await API.get("/admin/dividends/declarations");
-      setDeclarations(res.data);
-    } catch (error) {
-      console.error("Error loading declarations:", error);
-      alert("Failed to load dividend declarations");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeclareNewDividend = async (e) => {
-    e.preventDefault();
-    
-    if (!newDeclaration.financialYear || !newDeclaration.dividendRate) {
-      alert("Please fill in all required fields");
+  const handleFile = (e) => {
+    setError("");
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.name.endsWith(".csv")) {
+      setError("Please upload a .csv file.");
       return;
     }
-
-    if (parseFloat(newDeclaration.dividendRate) <= 0 || parseFloat(newDeclaration.dividendRate) > 20) {
-      alert("Dividend rate must be between 0.1% and 20%");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await API.post("/admin/dividends/declare", newDeclaration);
-      alert(`Dividends declared successfully for ${res.data.declaration.financialYear}!\n\n` +
-            `Total Members: ${res.data.declaration.membersCount}\n` +
-            `Total Amount: KES ${res.data.declaration.totalDividendAmount.toLocaleString()}`);
-      
-      setNewDeclaration({
-        financialYear: new Date().getFullYear(),
-        dividendRate: "",
-        notes: ""
-      });
-      setActiveView("declarations");
-      loadDeclarations();
-    } catch (error) {
-      console.error("Error declaring dividends:", error);
-      alert(error.response?.data?.message || "Failed to declare dividends");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleViewDetails = async (declarationId) => {
-    setLoading(true);
-    try {
-      const res = await API.get(`/admin/dividends/declaration/${declarationId}`);
-      setSelectedDeclaration(res.data.declaration);
-      setAllocations(res.data.allocations);
-      setActiveView("view-details");
-    } catch (error) {
-      console.error("Error loading declaration details:", error);
-      alert("Failed to load declaration details");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePayDividends = async (declarationId) => {
-    if (!window.confirm("Are you sure you want to pay these dividends? This action will credit all member accounts and cannot be undone.")) {
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await API.post(`/admin/dividends/pay/${declarationId}`);
-      alert(`Dividends paid successfully!\n\n` +
-            `Members Paid: ${res.data.stats.membersPaid}\n` +
-            `Total Amount: KES ${res.data.stats.totalAmount.toLocaleString()}`);
-      
-      loadDeclarations();
-      if (selectedDeclaration?.id === declarationId) {
-        handleViewDetails(declarationId);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = parseCSV(evt.target.result);
+        if (parsed.length === 0) {
+          setError("CSV is empty or has no data rows.");
+          return;
+        }
+        // Validate required columns
+        const required = ["sacco_number", "loan_amount", "loan_date"];
+        const missing = required.filter((col) => !(col in parsed[0]));
+        if (missing.length > 0) {
+          setError(`Missing required columns: ${missing.join(", ")}`);
+          return;
+        }
+        setRows(parsed);
+        setStep("preview");
+      } catch {
+        setError("Failed to parse CSV. Please check the file format.");
       }
-    } catch (error) {
-      console.error("Error paying dividends:", error);
-      alert(error.response?.data?.message || "Failed to pay dividends");
-    } finally {
-      setLoading(false);
-    }
+    };
+    reader.readAsText(file);
   };
 
-  const handleDeleteDeclaration = async (declarationId) => {
-    if (!window.confirm("Are you sure you want to delete this dividend declaration? This action cannot be undone.")) {
-      return;
-    }
-
+  const handleSubmit = async () => {
     setLoading(true);
+    setError("");
     try {
-      await API.delete(`/admin/dividends/declaration/${declarationId}`);
-      alert("Dividend declaration deleted successfully");
-      loadDeclarations();
-      if (activeView === "view-details") {
-        setActiveView("declarations");
-      }
-    } catch (error) {
-      console.error("Error deleting declaration:", error);
-      alert(error.response?.data?.message || "Failed to delete declaration");
+      const loans = rows.map((r) => ({
+        sacco_number     : r.sacco_number || "",
+        loan_amount      : r.loan_amount      ? parseFloat(r.loan_amount)      : undefined,
+        interest_rate    : r.interest_rate    ? parseFloat(r.interest_rate)    : 1.045,
+        repayment_period : r.repayment_period ? parseInt(r.repayment_period)   : 12,
+        loan_purpose     : r.loan_purpose     || "Historical loan",
+        loan_date        : r.loan_date        || new Date().toISOString().split("T")[0],
+        // partial payment support
+        principal_paid   : r.principal_paid   ? parseFloat(r.principal_paid)   : undefined,
+        interest_paid    : r.interest_paid    ? parseFloat(r.interest_paid)    : undefined,
+        last_payment_date: r.last_payment_date || undefined,
+        notes            : r.notes            || "Bulk imported historical loan",
+      }));
+
+      const res = await API.post("/admin/loans/bulk-create", { loans });
+      setResult(res.data);
+      setStep("result");
+    } catch (err) {
+      setError(err.response?.data?.message || "Upload failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const renderDeclarationsList = () => (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Dividend Declarations</h2>
-        <button
-          onClick={() => setActiveView("declare-new")}
-          className="bg-red-700 text-white px-6 py-2 rounded-lg hover:bg-red-800 transition font-semibold"
-        >
-          + Declare New Dividend
-        </button>
-      </div>
-
-      {loading && <p className="text-gray-600">Loading...</p>}
-
-      {!loading && declarations.length === 0 && (
-        <div className="bg-gray-50 p-8 rounded-lg text-center">
-          <p className="text-gray-600">No dividend declarations yet.</p>
-          <button
-            onClick={() => setActiveView("declare-new")}
-            className="mt-4 text-red-700 hover:underline font-semibold"
-          >
-            Declare your first dividend
-          </button>
-        </div>
-      )}
-
-      {!loading && declarations.length > 0 && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Financial Year
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Dividend Rate
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Declaration Date
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {declarations.map((declaration) => (
-                <tr key={declaration.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {declaration.financialYear}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {declaration.dividendRate}%
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    KES {declaration.totalDividendAmount.toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(declaration.declarationDate).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                      declaration.paymentStatus === 'PAID' 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {declaration.paymentStatus}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                    <button
-                      onClick={() => handleViewDetails(declaration.id)}
-                      className="text-blue-600 hover:text-blue-800 font-semibold"
-                    >
-                      View Details
-                    </button>
-                    {declaration.paymentStatus === 'PENDING' && (
-                      <>
-                        <button
-                          onClick={() => handlePayDividends(declaration.id)}
-                          className="text-green-600 hover:text-green-800 font-semibold"
-                          disabled={loading}
-                        >
-                          Pay Dividends
-                        </button>
-                        <button
-                          onClick={() => handleDeleteDeclaration(declaration.id)}
-                          className="text-red-600 hover:text-red-800 font-semibold"
-                          disabled={loading}
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderDeclareNewForm = () => (
-    <div>
-      <div className="mb-6">
-        <button
-          onClick={() => setActiveView("declarations")}
-          className="text-red-700 hover:underline font-semibold"
-        >
-          ← Back to Declarations
-        </button>
-      </div>
-
-      <div className="bg-white rounded-lg shadow p-8 max-w-2xl">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6">Declare New Dividend</h2>
-        
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <h3 className="font-semibold text-blue-900 mb-2">ℹ️ About Dividend Rates</h3>
-          <p className="text-sm text-blue-800 mb-2">
-            Typical SACCO dividend rates in Kenya range from 8% to 12% annually, based on the SACCO's financial performance.
-          </p>
-          <ul className="text-sm text-blue-800 space-y-1 ml-4 list-disc">
-            <li>Conservative SACCOs: 8-9%</li>
-            <li>Standard performing SACCOs: 10-11%</li>
-            <li>High-performing SACCOs: 12-15%</li>
-          </ul>
-        </div>
-
-        <form onSubmit={handleDeclareNewDividend} className="space-y-6">
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Financial Year *
-            </label>
-            <input
-              type="number"
-              min="2020"
-              max="2100"
-              value={newDeclaration.financialYear}
-              onChange={(e) => setNewDeclaration({...newDeclaration, financialYear: parseInt(e.target.value)})}
-              className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              The year for which dividends are being declared (e.g., 2024)
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Dividend Rate (%) *
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0.1"
-              max="20"
-              value={newDeclaration.dividendRate}
-              onChange={(e) => setNewDeclaration({...newDeclaration, dividendRate: e.target.value})}
-              className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
-              placeholder="e.g., 10.5"
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Enter the dividend rate as a percentage (0.1% - 20%)
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Notes (Optional)
-            </label>
-            <textarea
-              value={newDeclaration.notes}
-              onChange={(e) => setNewDeclaration({...newDeclaration, notes: e.target.value})}
-              className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-red-500"
-              rows="3"
-              placeholder="Add any notes about this dividend declaration..."
-            ></textarea>
-          </div>
-
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => setActiveView("declarations")}
-              className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300 transition"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-red-700 text-white py-3 rounded-lg font-semibold hover:bg-red-800 transition"
-              disabled={loading}
-            >
-              {loading ? "Declaring..." : "Declare Dividend"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-
-  const renderDeclarationDetails = () => (
-    <div>
-      <div className="mb-6">
-        <button
-          onClick={() => setActiveView("declarations")}
-          className="text-red-700 hover:underline font-semibold"
-        >
-          ← Back to Declarations
-        </button>
-      </div>
-
-      {selectedDeclaration && (
-        <>
-          {/* Declaration Summary */}
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-800">
-                  {selectedDeclaration.financialYear} Dividend Declaration
-                </h2>
-                <p className="text-gray-600">
-                  Declared on {new Date(selectedDeclaration.declarationDate).toLocaleDateString()}
-                </p>
-              </div>
-              <span className={`px-4 py-2 text-sm font-semibold rounded-full ${
-                selectedDeclaration.paymentStatus === 'PAID' 
-                  ? 'bg-green-100 text-green-800' 
-                  : 'bg-yellow-100 text-yellow-800'
-              }`}>
-                {selectedDeclaration.paymentStatus}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <p className="text-sm text-gray-600 mb-1">Dividend Rate</p>
-                <p className="text-2xl font-bold text-blue-700">
-                  {selectedDeclaration.dividendRate}%
-                </p>
-              </div>
-              <div className="bg-green-50 p-4 rounded-lg">
-                <p className="text-sm text-gray-600 mb-1">Total Eligible Savings</p>
-                <p className="text-2xl font-bold text-green-700">
-                  KES {selectedDeclaration.totalEligibleSavings.toLocaleString()}
-                </p>
-              </div>
-              <div className="bg-purple-50 p-4 rounded-lg">
-                <p className="text-sm text-gray-600 mb-1">Total Dividend Amount</p>
-                <p className="text-2xl font-bold text-purple-700">
-                  KES {selectedDeclaration.totalDividendAmount.toLocaleString()}
-                </p>
-              </div>
-            </div>
-
-            {selectedDeclaration.notes && (
-              <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                <p className="text-sm font-semibold text-gray-700 mb-1">Notes:</p>
-                <p className="text-gray-600">{selectedDeclaration.notes}</p>
-              </div>
-            )}
-
-            {selectedDeclaration.paymentStatus === 'PENDING' && (
-              <div className="mt-6">
-                <button
-                  onClick={() => handlePayDividends(selectedDeclaration.id)}
-                  className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition"
-                  disabled={loading}
-                >
-                  {loading ? "Processing..." : "Pay All Dividends"}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Member Allocations */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="px-6 py-4 bg-gray-50 border-b">
-              <h3 className="text-lg font-semibold text-gray-800">
-                Member Allocations ({allocations.length} members)
-              </h3>
-            </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Member
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      SACCO Number
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Savings Amount
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Dividend Amount
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Payment Date
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {allocations.map((allocation) => (
-                    <tr key={allocation.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {allocation.memberName}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {allocation.email}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {allocation.saccoNumber}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                        KES {allocation.savingsAmount.toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-green-600">
-                        KES {allocation.dividendAmount.toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                          allocation.paymentStatus === 'PAID' 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {allocation.paymentStatus}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500">
-                        {allocation.paymentDate 
-                          ? new Date(allocation.paymentDate).toLocaleDateString()
-                          : '-'
-                        }
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
+  const downloadTemplate = () => {
+    const csv = [
+      "sacco_number,loan_amount,interest_rate,repayment_period,loan_purpose,loan_date,principal_paid,interest_paid,last_payment_date,notes",
+      "SACCO-0001,50000,1.045,12,Business loan,2022-03-15,,,, No payments yet",
+      "SACCO-0002,75000,1.045,24,School fees,2021-11-01,30000,8500,2023-06-30,Partial repayment recorded",
+      "SACCO-0003,30000,1.045,6,Emergency,2023-01-20,,,,",
+    ].join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bulk_loan_upload_template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      {activeView === "declarations" && renderDeclarationsList()}
-      {activeView === "declare-new" && renderDeclareNewForm()}
-      {activeView === "view-details" && renderDeclarationDetails()}
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+
+        {/* Header */}
+        <div className="bg-indigo-700 text-white p-5 flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold">📤 Bulk Loan Upload</h2>
+            <p className="text-indigo-200 text-sm mt-0.5">Upload historical loans for members who borrowed before the system</p>
+          </div>
+          <button onClick={onClose} className="text-white hover:text-indigo-200 text-3xl font-bold leading-none">×</button>
+        </div>
+
+        <div className="p-6 overflow-y-auto flex-1 space-y-5">
+
+          {/* ── STEP: UPLOAD ── */}
+          {step === "upload" && (
+            <div className="space-y-5">
+              {/* Format guide */}
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 text-sm text-indigo-800 space-y-2">
+                <p className="font-semibold">📋 CSV Format for Historical Loans</p>
+                <div className="font-mono text-xs bg-white border border-indigo-100 rounded p-3 overflow-x-auto">
+                  <div className="text-green-700 font-semibold mb-1">Required columns:</div>
+                  sacco_number, loan_amount, loan_date
+                  <div className="text-blue-700 font-semibold mt-2 mb-1">Optional columns:</div>
+                  interest_rate, repayment_period, loan_purpose, notes
+                  <div className="text-amber-700 font-semibold mt-2 mb-1">For prior payments (if member already made repayments):</div>
+                  principal_paid, interest_paid, last_payment_date
+                </div>
+                <div className="space-y-1 text-xs">
+                  <p><strong>sacco_number:</strong> Member's SACCO number (e.g., SACCO-0001)</p>
+                  <p><strong>loan_amount:</strong> Principal loan amount (e.g., 50000)</p>
+                  <p><strong>interest_rate:</strong> Monthly rate (default: 1.045)</p>
+                  <p><strong>repayment_period:</strong> Months (default: 12)</p>
+                  <p><strong>loan_purpose:</strong> Why the loan was taken (default: "Historical loan")</p>
+                  <p><strong>loan_date:</strong> When loan was issued (YYYY-MM-DD) — required for backdating</p>
+                  <p><strong>principal_paid:</strong> Principal already repaid (leave blank if none)</p>
+                  <p><strong>interest_paid:</strong> Interest already paid (leave blank if none)</p>
+                  <p><strong>last_payment_date:</strong> Date of last prior payment (YYYY-MM-DD)</p>
+                  <p><strong>notes:</strong> Any additional information</p>
+                </div>
+              </div>
+
+              {/* Important note */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p className="text-sm text-yellow-800">
+                  <span className="font-bold">⚠️ Important:</span> Loans will be automatically approved and backdated.
+                  If <strong>principal_paid</strong> or <strong>interest_paid</strong> are provided, the system records them as a prior payment and adjusts the current balance accordingly.
+                </p>
+              </div>
+
+              {/* Template download */}
+              <button
+                onClick={downloadTemplate}
+                className="text-sm text-indigo-600 hover:text-indigo-800 underline font-medium"
+              >
+                ⬇️ Download CSV Template
+              </button>
+
+              {/* File upload */}
+              <div
+                className="border-2 border-dashed border-indigo-300 rounded-xl p-10 text-center cursor-pointer hover:bg-indigo-50 transition"
+                onClick={() => fileRef.current?.click()}
+              >
+                <p className="text-4xl mb-2">📂</p>
+                <p className="text-gray-600 font-semibold">Click to select a CSV file</p>
+                <p className="text-gray-400 text-sm mt-1">or drag and drop</p>
+                <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
+              </div>
+
+              {error && <p className="text-red-600 text-sm font-medium">{error}</p>}
+            </div>
+          )}
+
+          {/* ── STEP: PREVIEW ── */}
+          {step === "preview" && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-gray-600">
+                  <span className="font-bold text-gray-900">{rows.length}</span> historical loans ready to import
+                </p>
+                <button
+                  onClick={() => { setStep("upload"); setRows([]); fileRef.current && (fileRef.current.value = ""); }}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  ← Change file
+                </button>
+              </div>
+
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">SACCO #</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Loan Amount</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Loan Date</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Rate</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Period</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Purpose</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-amber-700 uppercase bg-amber-50">Principal Paid</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-amber-700 uppercase bg-amber-50">Interest Paid</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-amber-700 uppercase bg-amber-50">Last Pmt Date</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {rows.map((row, i) => {
+                      const hasPmt = row.principal_paid || row.interest_paid;
+                      return (
+                        <tr key={i} className={`${hasPmt ? "bg-amber-50/40" : ""} hover:bg-gray-50`}>
+                          <td className="px-3 py-2 text-gray-700 font-medium">{row.sacco_number}</td>
+                          <td className="px-3 py-2 text-gray-700 font-semibold">KES {parseFloat(row.loan_amount || 0).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-amber-700 font-medium">{row.loan_date || "—"}</td>
+                          <td className="px-3 py-2 text-gray-700">{row.interest_rate || "1.045"}%</td>
+                          <td className="px-3 py-2 text-gray-700">{row.repayment_period || "12"} mo</td>
+                          <td className="px-3 py-2 text-gray-500 max-w-xs truncate">{row.loan_purpose || "Historical loan"}</td>
+                          <td className={`px-3 py-2 font-medium ${hasPmt && row.principal_paid ? "text-emerald-700" : "text-gray-300"}`}>
+                            {row.principal_paid ? `KES ${parseFloat(row.principal_paid).toLocaleString()}` : "—"}
+                          </td>
+                          <td className={`px-3 py-2 font-medium ${hasPmt && row.interest_paid ? "text-orange-600" : "text-gray-300"}`}>
+                            {row.interest_paid ? `KES ${parseFloat(row.interest_paid).toLocaleString()}` : "—"}
+                          </td>
+                          <td className={`px-3 py-2 ${hasPmt && row.last_payment_date ? "text-amber-700" : "text-gray-300"}`}>
+                            {row.last_payment_date || "—"}
+                          </td>
+                          <td className="px-3 py-2 text-gray-400 max-w-xs truncate">{row.notes || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {error && <p className="text-red-600 text-sm font-medium">{error}</p>}
+            </div>
+          )}
+
+          {/* ── STEP: RESULT ── */}
+          {step === "result" && result && (
+            <div className="space-y-4">
+              <div className={`rounded-lg p-4 text-sm font-semibold ${
+                result.failed.length === 0
+                  ? "bg-green-50 text-green-800 border border-green-200"
+                  : result.successful.length === 0
+                  ? "bg-red-50 text-red-800 border border-red-200"
+                  : "bg-yellow-50 text-yellow-800 border border-yellow-200"
+              }`}>
+                {result.message || `Imported ${result.successful.length} loans successfully`}
+              </div>
+
+              {result.successful.length > 0 && (
+                <div>
+                  <p className="font-semibold text-green-700 mb-2">✅ Successfully Imported ({result.successful.length})</p>
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="min-w-full text-sm divide-y divide-gray-200">
+                      <thead className="bg-green-50">
+                        <tr>
+                          {["Loan ID", "SACCO #", "Member Name", "Amount", "Period", "Status"].map(h => (
+                            <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {result.successful.map((s, i) => (
+                          <tr key={i}>
+                            <td className="px-3 py-2 font-mono text-gray-600">{s.loan_id}</td>
+                            <td className="px-3 py-2 font-semibold">{s.sacco_number}</td>
+                            <td className="px-3 py-2">{s.member_name}</td>
+                            <td className="px-3 py-2 text-green-700 font-bold">KES {s.amount?.toLocaleString()}</td>
+                            <td className="px-3 py-2">{s.repayment_period} months</td>
+                            <td className="px-3 py-2">
+                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
+                                {s.status || 'APPROVED'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {result.failed.length > 0 && (
+                <div>
+                  <p className="font-semibold text-red-700 mb-2">❌ Failed ({result.failed.length})</p>
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="min-w-full text-sm divide-y divide-gray-200">
+                      <thead className="bg-red-50">
+                        <tr>
+                          {["SACCO #", "Amount", "Reason"].map(h => (
+                            <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {result.failed.map((f, i) => (
+                          <tr key={i}>
+                            <td className="px-3 py-2 font-semibold">{f.sacco_number}</td>
+                            <td className="px-3 py-2">KES {f.loan_amount?.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-red-600">{f.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="bg-gray-50 px-6 py-4 border-t flex justify-between items-center">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition"
+          >
+            {step === "result" ? "Close" : "Cancel"}
+          </button>
+
+          <div className="flex gap-3">
+            {step === "preview" && (
+              <button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition disabled:opacity-60"
+              >
+                {loading ? "Importing..." : `Import ${rows.length} Loans`}
+              </button>
+            )}
+            {step === "result" && result?.successful.length > 0 && (
+              <button
+                onClick={onSuccess}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition"
+              >
+                Done & Refresh
+              </button>
+            )}
+          </div>
+        </div>
+
+      </div>
     </div>
   );
-}
+};
+
+export default BulkLoanUpload;

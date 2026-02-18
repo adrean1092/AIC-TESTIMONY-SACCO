@@ -571,7 +571,12 @@ router.post("/loans", auth, async (req, res) => {
     repayment_period,
     loan_purpose,
     status,
-    created_at
+    created_at,
+    // ── partial payment support for historical loans ──────────────────
+    principal_paid,
+    interest_paid,
+    last_payment_date,
+    notes,
   } = req.body;
 
   const finalUserId = userId || memberId;
@@ -620,16 +625,30 @@ router.post("/loans", auth, async (req, res) => {
     const processingFee = loanAmount * 0.005;
     const principalWithFee = loanAmount + processingFee;
 
-    // Calculate interest and monthly payment using reducing balance
+    // Calculate interest and monthly payment using amortisation formula
     const monthlyRate = parseFloat(interest_rate) / 100;
     const periods = parseInt(repayment_period);
     
-    // Monthly payment using amortization formula
     const monthlyPayment = (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, periods)) / 
                           (Math.pow(1 + monthlyRate, periods) - 1);
     
     const totalPayable = monthlyPayment * periods;
     const totalInterest = totalPayable - principalWithFee;
+
+    // Prior payment state for historical loans
+    const prevPrincipalPaid = parseFloat(principal_paid || 0);
+    const prevInterestPaid  = parseFloat(interest_paid  || 0);
+    const hasPriorPayments  = prevPrincipalPaid > 0 || prevInterestPaid > 0;
+
+    if (hasPriorPayments && prevPrincipalPaid > principalWithFee) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: `principal_paid (${prevPrincipalPaid}) exceeds total principal + fee (${principalWithFee.toFixed(2)})`
+      });
+    }
+
+    // Current outstanding = principal+fee minus what's already been paid
+    const currentBalance = Math.max(0, principalWithFee - prevPrincipalPaid);
 
     const loanCreatedAt = created_at || new Date().toISOString();
     const loanStatus = status || 'APPROVED';
@@ -639,25 +658,50 @@ router.post("/loans", auth, async (req, res) => {
       `INSERT INTO loans (
         user_id, amount, initial_amount, principal_amount, 
         interest_rate, repayment_period, loan_purpose, 
-        processing_fee, monthly_payment, total_interest, 
+        processing_fee, monthly_payment, total_interest,
+        principal_paid, interest_paid,
         status, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *`,
       [
         finalUserId, 
-        principalWithFee, // Current outstanding balance (principal + fee)
-        loanAmount, // Original requested amount
-        principalWithFee, // Principal with processing fee
+        currentBalance,       // current outstanding balance
+        loanAmount,           // original requested amount
+        principalWithFee,
         parseFloat(interest_rate),
         periods,
         loan_purpose || null,
         processingFee,
         monthlyPayment,
         totalInterest,
+        prevPrincipalPaid,
+        prevInterestPaid,
         loanStatus,
         loanCreatedAt
       ]
     );
+
+    const loanId = loanRes.rows[0].id;
+
+    // Insert backdated payment record if prior payments exist
+    if (hasPriorPayments) {
+      const paymentDate = last_payment_date || created_at || new Date().toISOString();
+      await client.query(
+        `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date)
+         VALUES ($1, $2, $3, $4)`,
+        [loanId, prevPrincipalPaid, prevInterestPaid, paymentDate]
+      );
+    }
+
+    // Optional internal note
+    if (notes) {
+      try {
+        await client.query(
+          `INSERT INTO loan_notes (loan_id, note, created_by, created_at) VALUES ($1, $2, $3, NOW())`,
+          [loanId, notes, req.user.id]
+        );
+      } catch (_) { /* loan_notes table may not exist in all deployments */ }
+    }
 
     await client.query("COMMIT");
 
@@ -668,6 +712,8 @@ router.post("/loans", auth, async (req, res) => {
         amount: parseFloat(loanRes.rows[0].amount),
         initialAmount: parseFloat(loanRes.rows[0].initial_amount),
         principalAmount: parseFloat(loanRes.rows[0].principal_amount),
+        principalPaid: parseFloat(loanRes.rows[0].principal_paid || 0),
+        interestPaid: parseFloat(loanRes.rows[0].interest_paid || 0),
         interestRate: parseFloat(loanRes.rows[0].interest_rate),
         repaymentPeriod: loanRes.rows[0].repayment_period,
         processingFee: parseFloat(loanRes.rows[0].processing_fee),
