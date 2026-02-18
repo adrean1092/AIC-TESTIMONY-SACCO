@@ -7,6 +7,8 @@ import Editmembermodal from "./Editmembermodal";
 import EditLoanModal from "./EditLoanModal";
 import LoanApprovalModal from "./Loanapprovalmodal";
 import Bulkloanpaymentupload from "./Bulkloanpaymentupload";
+import BulkLoanUpload from "./Bulkloanupload";
+import AddHistoricalLoanModal from "./AddHistoricalLoanModal";
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("members");
@@ -24,6 +26,8 @@ const AdminDashboard = () => {
   const [selectedLoanGuarantors, setSelectedLoanGuarantors] = useState(null);
   const [loadingGuarantors, setLoadingGuarantors] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [showBulkLoanUpload, setShowBulkLoanUpload] = useState(false);
+  const [showHistoricalLoanModal, setShowHistoricalLoanModal] = useState(false);
 
   // Savings state
   const [savingsAmount, setSavingsAmount] = useState({});
@@ -407,6 +411,18 @@ const AdminDashboard = () => {
               </div>
               <div className="flex gap-2 flex-wrap">
                 <button
+                  onClick={() => setShowHistoricalLoanModal(true)}
+                  className="bg-slate-700 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-800 transition whitespace-nowrap"
+                >
+                  🕐 Add Historical Loan
+                </button>
+                <button
+                  onClick={() => setShowBulkLoanUpload(true)}
+                  className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-emerald-700 transition whitespace-nowrap"
+                >
+                  📥 Bulk Loan Import
+                </button>
+                <button
                   onClick={() => setShowBulkUpload(true)}
                   className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition whitespace-nowrap"
                 >
@@ -698,6 +714,22 @@ const AdminDashboard = () => {
         <Bulkloanpaymentupload
           onClose={() => setShowBulkUpload(false)}
           onSuccess={() => { setShowBulkUpload(false); loadLoans(); }}
+        />
+      )}
+
+      {/* Bulk Historical Loan Import */}
+      {showBulkLoanUpload && (
+        <BulkLoanUpload
+          onClose={() => setShowBulkLoanUpload(false)}
+          onSuccess={() => { setShowBulkLoanUpload(false); loadLoans(); loadMembers(); }}
+        />
+      )}
+
+      {/* Single Historical Loan */}
+      {showHistoricalLoanModal && (
+        <AddHistoricalLoanModal
+          onClose={() => setShowHistoricalLoanModal(false)}
+          onSuccess={() => { setShowHistoricalLoanModal(false); loadLoans(); loadMembers(); }}
         />
       )}
     </div>
