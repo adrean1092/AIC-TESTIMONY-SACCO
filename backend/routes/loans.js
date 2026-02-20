@@ -549,4 +549,138 @@ router.post("/:id/reject", auth, async (req, res) => {
   }
 });
 
+// POST /loans/backfill-payments
+// One-time script to calculate & populate principal_paid / interest_paid
+// for all APPROVED loans that currently have 0 recorded payments.
+router.post("/backfill-payments", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Forbidden: Admin access required" });
+  }
+
+  function calcElapsedPayments(principalWithFee, monthlyRate, period, monthsElapsed) {
+    if (monthlyRate <= 0 || period <= 0) {
+      return { monthlyPayment: 0, principalPaid: 0, interestPaid: 0, remainingBalance: principalWithFee };
+    }
+    const monthlyPayment =
+      (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, period)) /
+      (Math.pow(1 + monthlyRate, period) - 1);
+
+    let balance = principalWithFee;
+    let totalPrincipalPaid = 0;
+    let totalInterestPaid = 0;
+    const paymentsToProcess = Math.min(monthsElapsed, period);
+
+    for (let m = 0; m < paymentsToProcess; m++) {
+      const interestThisMonth = balance * monthlyRate;
+      const principalThisMonth = monthlyPayment - interestThisMonth;
+      totalInterestPaid += interestThisMonth;
+      totalPrincipalPaid += principalThisMonth;
+      balance -= principalThisMonth;
+    }
+
+    return {
+      monthlyPayment,
+      principalPaid: Math.max(0, totalPrincipalPaid),
+      interestPaid: Math.max(0, totalInterestPaid),
+      remainingBalance: Math.max(0, balance),
+    };
+  }
+
+  const client = await pool.connect();
+  try {
+    const loansRes = await client.query(`
+      SELECT 
+        id, amount, initial_amount, principal_amount,
+        interest_rate, repayment_period,
+        principal_paid, interest_paid,
+        processing_fee, monthly_payment,
+        created_at, status
+      FROM loans
+      WHERE status = 'APPROVED'
+        AND COALESCE(principal_paid, 0) = 0
+        AND COALESCE(interest_paid, 0) = 0
+      ORDER BY created_at ASC
+    `);
+
+    const today = new Date();
+    const results = { updated: [], skipped: [] };
+
+    for (const loan of loansRes.rows) {
+      const loanStart = new Date(loan.created_at);
+      const monthsElapsed =
+        (today.getFullYear() - loanStart.getFullYear()) * 12 +
+        (today.getMonth() - loanStart.getMonth());
+
+      if (monthsElapsed <= 0) {
+        results.skipped.push({ id: loan.id, reason: "Loan just started, no payments due yet" });
+        continue;
+      }
+
+      const principalWithFee = parseFloat(loan.principal_amount || loan.initial_amount || loan.amount);
+      const monthlyRate = parseFloat(loan.interest_rate) / 100;
+      const period = parseInt(loan.repayment_period);
+
+      if (!principalWithFee || !monthlyRate || !period) {
+        results.skipped.push({ id: loan.id, reason: "Missing rate, period, or amount" });
+        continue;
+      }
+
+      const calc = calcElapsedPayments(principalWithFee, monthlyRate, period, monthsElapsed);
+
+      await client.query(
+        `UPDATE loans
+         SET principal_paid  = $1,
+             interest_paid   = $2,
+             amount          = $3,
+             monthly_payment = $4,
+             processing_fee  = CASE WHEN COALESCE(processing_fee, 0) = 0 THEN $5 ELSE processing_fee END
+         WHERE id = $6`,
+        [
+          parseFloat(calc.principalPaid.toFixed(2)),
+          parseFloat(calc.interestPaid.toFixed(2)),
+          parseFloat(calc.remainingBalance.toFixed(2)),
+          parseFloat(calc.monthlyPayment.toFixed(2)),
+          parseFloat(((loan.initial_amount || loan.amount) * 0.005).toFixed(2)),
+          loan.id,
+        ]
+      );
+
+      // Insert consolidated payment record (ignore if loan_payments table doesn't exist)
+      try {
+        await client.query(
+          `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date, notes)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            loan.id,
+            parseFloat(calc.principalPaid.toFixed(2)),
+            parseFloat(calc.interestPaid.toFixed(2)),
+            today.toISOString().split("T")[0],
+            `Backfilled: ${monthsElapsed} months of elapsed payments`,
+          ]
+        );
+      } catch (_) { /* loan_payments table may not exist, safe to ignore */ }
+
+      results.updated.push({
+        id: loan.id,
+        monthsElapsed,
+        principalPaid: parseFloat(calc.principalPaid.toFixed(2)),
+        interestPaid: parseFloat(calc.interestPaid.toFixed(2)),
+        newBalance: parseFloat(calc.remainingBalance.toFixed(2)),
+        monthlyPayment: parseFloat(calc.monthlyPayment.toFixed(2)),
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Backfill complete: ${results.updated.length} updated, ${results.skipped.length} skipped`,
+      results,
+    });
+  } catch (err) {
+    console.error("Backfill error:", err);
+    res.status(500).json({ message: "Server error: " + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
