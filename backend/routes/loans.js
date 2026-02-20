@@ -550,15 +550,19 @@ router.post("/:id/reject", auth, async (req, res) => {
 });
 
 // POST /loans/backfill-payments
-// One-time script to calculate & populate principal_paid / interest_paid
-// for all APPROVED loans that currently have 0 recorded payments.
+// Recalculates principal_paid / interest_paid for APPROVED loans showing 0.
+// Accepts optional body: { months_override: 6 } to force a specific number of months
+// Handles future-dated loans by using months_override or defaulting to 1 month elapsed.
 router.post("/backfill-payments", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") {
     return res.status(403).json({ message: "Forbidden: Admin access required" });
   }
 
+  // Admin can pass months_override to force a specific elapsed month count
+  const monthsOverride = req.body?.months_override ? parseInt(req.body.months_override) : null;
+
   function calcElapsedPayments(principalWithFee, monthlyRate, period, monthsElapsed) {
-    if (monthlyRate <= 0 || period <= 0) {
+    if (monthlyRate <= 0 || period <= 0 || monthsElapsed <= 0) {
       return { monthlyPayment: 0, principalPaid: 0, interestPaid: 0, remainingBalance: principalWithFee };
     }
     const monthlyPayment =
@@ -588,13 +592,18 @@ router.post("/backfill-payments", auth, async (req, res) => {
 
   const client = await pool.connect();
   try {
+    // Ensure columns exist (safe to run multiple times)
+    await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS principal_paid NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS interest_paid NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS monthly_payment NUMERIC DEFAULT 0`);
+    await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS processing_fee NUMERIC DEFAULT 0`);
+
     const loansRes = await client.query(`
-      SELECT 
-        id, amount, initial_amount, principal_amount,
-        interest_rate, repayment_period,
-        principal_paid, interest_paid,
-        processing_fee, monthly_payment,
-        created_at, status
+      SELECT id, amount, initial_amount, principal_amount,
+             interest_rate, repayment_period,
+             COALESCE(principal_paid, 0) as principal_paid,
+             COALESCE(interest_paid, 0) as interest_paid,
+             processing_fee, monthly_payment, created_at
       FROM loans
       WHERE status = 'APPROVED'
         AND COALESCE(principal_paid, 0) = 0
@@ -606,16 +615,6 @@ router.post("/backfill-payments", auth, async (req, res) => {
     const results = { updated: [], skipped: [] };
 
     for (const loan of loansRes.rows) {
-      const loanStart = new Date(loan.created_at);
-      const monthsElapsed =
-        (today.getFullYear() - loanStart.getFullYear()) * 12 +
-        (today.getMonth() - loanStart.getMonth());
-
-      if (monthsElapsed <= 0) {
-        results.skipped.push({ id: loan.id, reason: "Loan just started, no payments due yet" });
-        continue;
-      }
-
       const principalWithFee = parseFloat(loan.principal_amount || loan.initial_amount || loan.amount);
       const monthlyRate = parseFloat(loan.interest_rate) / 100;
       const period = parseInt(loan.repayment_period);
@@ -625,7 +624,30 @@ router.post("/backfill-payments", auth, async (req, res) => {
         continue;
       }
 
+      // Calculate months elapsed — handle future-dated loans gracefully
+      const loanStart = new Date(loan.created_at);
+      let monthsElapsed =
+        (today.getFullYear() - loanStart.getFullYear()) * 12 +
+        (today.getMonth() - loanStart.getMonth());
+
+      // If loan is future-dated or just started, use override or default to 1
+      if (monthsElapsed <= 0) {
+        if (monthsOverride && monthsOverride > 0) {
+          monthsElapsed = monthsOverride;
+        } else {
+          // Default: assume 1 month has elapsed for future-dated loans
+          monthsElapsed = 1;
+        }
+      } else if (monthsOverride && monthsOverride > 0) {
+        monthsElapsed = monthsOverride;
+      }
+
+      // Cap at period length
+      monthsElapsed = Math.min(monthsElapsed, period);
+
       const calc = calcElapsedPayments(principalWithFee, monthlyRate, period, monthsElapsed);
+
+      const processingFee = parseFloat(loan.processing_fee) || parseFloat(((loan.initial_amount || loan.amount) * 0.005).toFixed(2));
 
       await client.query(
         `UPDATE loans
@@ -640,12 +662,12 @@ router.post("/backfill-payments", auth, async (req, res) => {
           parseFloat(calc.interestPaid.toFixed(2)),
           parseFloat(calc.remainingBalance.toFixed(2)),
           parseFloat(calc.monthlyPayment.toFixed(2)),
-          parseFloat(((loan.initial_amount || loan.amount) * 0.005).toFixed(2)),
+          processingFee,
           loan.id,
         ]
       );
 
-      // Insert consolidated payment record (ignore if loan_payments table doesn't exist)
+      // Insert payment record
       try {
         await client.query(
           `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date, notes)
@@ -655,10 +677,10 @@ router.post("/backfill-payments", auth, async (req, res) => {
             parseFloat(calc.principalPaid.toFixed(2)),
             parseFloat(calc.interestPaid.toFixed(2)),
             today.toISOString().split("T")[0],
-            `Backfilled: ${monthsElapsed} months of elapsed payments`,
+            `Backfilled: ${monthsElapsed} month(s) of payments`,
           ]
         );
-      } catch (_) { /* loan_payments table may not exist, safe to ignore */ }
+      } catch (_) { /* loan_payments table may not exist */ }
 
       results.updated.push({
         id: loan.id,

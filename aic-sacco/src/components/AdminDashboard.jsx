@@ -104,10 +104,26 @@ const AdminDashboard = () => {
   };
 
   const runBackfill = async () => {
-    if (!window.confirm("This will recalculate principal_paid and interest_paid for all loans that currently show 0. Continue?")) return;
+    const monthsInput = window.prompt(
+      "How many months of payments to calculate?\n\n" +
+      "• Enter a number (e.g. 6) to set a specific month count\n" +
+      "• Leave blank to auto-calculate from loan date\n" +
+      "• For future-dated loans (like 9/17/2026), enter the actual months elapsed since the loan started",
+      "1"
+    );
+    if (monthsInput === null) return; // cancelled
+
+    const months_override = monthsInput.trim() === "" ? undefined : parseInt(monthsInput);
+
     try {
-      const res = await API.post("/loans/backfill-payments");
-      alert(`✅ ${res.data.message}\n\nUpdated: ${res.data.results.updated.length} loans\nSkipped: ${res.data.results.skipped.length} loans`);
+      const res = await API.post("/loans/backfill-payments", months_override ? { months_override } : {});
+      const { updated, skipped } = res.data.results;
+      alert(
+        `✅ ${res.data.message}\n\n` +
+        (updated.length > 0
+          ? `Sample update:\nLoan #${updated[0].id}: Principal Paid KES ${updated[0].principalPaid.toLocaleString()}, Interest KES ${updated[0].interestPaid.toLocaleString()}, Balance KES ${updated[0].newBalance.toLocaleString()}`
+          : "No loans were updated.")
+      );
       loadLoans();
     } catch (error) {
       alert("❌ Backfill failed: " + (error.response?.data?.message || error.message));
@@ -423,7 +439,7 @@ const AdminDashboard = () => {
               <div className="flex gap-2 flex-wrap">
                 <button
                   onClick={runBackfill}
-                  className="bg-orange-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-orange-700 transition whitespace-nowrap"
+                  className="bg-orange-500 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-orange-600 transition whitespace-nowrap"
                 >
                   🔧 Fix Payment Data
                 </button>
