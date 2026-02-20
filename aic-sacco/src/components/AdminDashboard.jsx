@@ -474,6 +474,7 @@ const AdminDashboard = () => {
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Member</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Amount</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Repayment</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Rate</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Period</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
@@ -485,8 +486,17 @@ const AdminDashboard = () => {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {filteredLoans.map((l, idx) => {
-                      const total = parseFloat(l.initial_amount || l.amount || 0);
+                      const total = parseFloat(l.initialAmount || l.initial_amount || l.amount || 0);
                       const balance = parseFloat(l.amount || 0);
+                      const principalPaid = parseFloat(l.principalPaid || l.principal_paid || 0);
+                      const interestPaid = parseFloat(l.interestPaid || l.interest_paid || 0);
+                      const totalPaid = principalPaid + interestPaid;
+                      const principalWithFee = parseFloat(l.principalAmount || l.principal_amount || total);
+
+                      // Calculate repayment percentage
+                      const repaymentPercent = principalWithFee > 0 
+                        ? ((principalPaid / principalWithFee) * 100).toFixed(1)
+                        : 0;
 
                       return (
                         <tr key={l.id || idx} className="hover:bg-gray-50 transition">
@@ -498,8 +508,40 @@ const AdminDashboard = () => {
                             <div className="font-bold text-gray-900">KES {total.toLocaleString()}</div>
                             <div className="text-xs text-red-600">Bal: KES {balance.toLocaleString()}</div>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-700">{l.interest_rate || l.interestRate || 10}%</td>
-                          <td className="px-4 py-3 text-sm text-gray-700">{l.repayment_period || l.repaymentPeriod || '—'} mo</td>
+                          {/* ✅ NEW REPAYMENT COLUMN */}
+                          <td className="px-4 py-3 text-sm">
+                            {l.status === "APPROVED" ? (
+                              <div>
+                                <div className="font-semibold text-green-700">
+                                  KES {totalPaid.toLocaleString()}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Principal: {principalPaid.toLocaleString()}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Interest: {interestPaid.toLocaleString()}
+                                </div>
+                                {/* Progress bar */}
+                                <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
+                                  <div 
+                                    className="bg-green-600 h-1.5 rounded-full transition-all"
+                                    style={{ width: `${Math.min(repaymentPercent, 100)}%` }}
+                                  ></div>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-0.5">
+                                  {repaymentPercent}% repaid
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {l.interest_rate || l.interestRate || 10}%
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {l.repayment_period || l.repaymentPeriod || '—'} mo
+                          </td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-full text-xs font-bold ${
                               l.status === "PENDING" ? "bg-yellow-100 text-yellow-800" :
@@ -552,20 +594,20 @@ const AdminDashboard = () => {
                                 Edit
                               </button>
                               {l.status === "PENDING" && (
-                                <>
-                                  <button
-                                    onClick={() => setApprovingLoan(l)}
-                                    className="bg-green-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-green-700 transition"
-                                  >
-                                    Approve
-                                  </button>
-                                  <button
-                                    onClick={() => rejectLoan(l.id)}
-                                    className="bg-red-500 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-red-600 transition"
-                                  >
-                                    Reject
-                                  </button>
-                                </>
+                                <button
+                                  onClick={() => setApprovingLoan(l)}
+                                  className="bg-green-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-green-700 transition"
+                                >
+                                  Approve
+                                </button>
+                              )}
+                              {l.status === "PENDING" && (
+                                <button
+                                  onClick={() => rejectLoan(l.id)}
+                                  className="bg-red-600 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-red-700 transition"
+                                >
+                                  Reject
+                                </button>
                               )}
                             </div>
                           </td>
@@ -574,7 +616,7 @@ const AdminDashboard = () => {
                     })}
                     {filteredLoans.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
+                        <td colSpan={10} className="px-4 py-10 text-center text-gray-400 text-sm">
                           No loans found
                         </td>
                       </tr>

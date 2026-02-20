@@ -4,7 +4,7 @@ const pool = require("../db");
 const auth = require("../middleware/auth");
 const { sendGuarantorNotification } = require("../utils/sendEmail");
 
-// ✅ NEW: ADMIN gets all loans with member details
+// ✅ FIXED: ADMIN gets all loans with member details + PAYMENT INFO
 router.get("/", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") {
     return res.status(403).json({ message: "Forbidden: Admin access required" });
@@ -23,10 +23,15 @@ router.get("/", auth, async (req, res) => {
         l.loan_purpose,
         l.status,
         l.created_at,
+        l.principal_paid,
+        l.interest_paid,
+        l.monthly_payment,
+        l.processing_fee,
         u.full_name,
         u.email,
         u.phone,
-        u.id_number
+        u.id_number,
+        u.sacco_number
       FROM loans l
       JOIN users u ON l.user_id = u.id
       ORDER BY l.created_at DESC`
@@ -62,14 +67,22 @@ router.get("/", auth, async (req, res) => {
           memberEmail: loan.email,
           memberPhone: loan.phone,
           memberIdNumber: loan.id_number,
-          amount: parseFloat(loan.amount),
-          principalAmount: parseFloat(loan.principal_amount),
-          initialAmount: parseFloat(loan.initial_amount),
-          interestRate: parseFloat(loan.interest_rate),
+          saccoNumber: loan.sacco_number,
+          amount: parseFloat(loan.amount || 0),
+          principalAmount: parseFloat(loan.principal_amount || 0),
+          initialAmount: parseFloat(loan.initial_amount || 0),
+          interestRate: parseFloat(loan.interest_rate || 0),
           repaymentPeriod: loan.repayment_period,
           loanPurpose: loan.loan_purpose,
           status: loan.status,
           createdAt: loan.created_at,
+          // ✅ NEW: Include payment information
+          principalPaid: parseFloat(loan.principal_paid || 0),
+          interestPaid: parseFloat(loan.interest_paid || 0),
+          monthlyPayment: parseFloat(loan.monthly_payment || 0),
+          processingFee: parseFloat(loan.processing_fee || 0),
+          // ✅ Calculate total paid and remaining
+          totalPaid: parseFloat(loan.principal_paid || 0) + parseFloat(loan.interest_paid || 0),
           guarantorCounts: counts
         };
       })
