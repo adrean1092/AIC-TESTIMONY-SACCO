@@ -952,7 +952,43 @@ router.get("/reports/all", auth, async (req, res) => {
 
 // ======== BULK HISTORICAL LOAN IMPORT ========
 
-// POST /api/admin/loans/bulk-create
+/**
+ * Helper function to calculate elapsed payments using amortization schedule
+ * This walks through the loan month-by-month and accumulates payments
+ */
+function calcElapsedPayments(principalWithFee, monthlyRate, period, monthsElapsed) {
+  // Calculate fixed monthly payment using amortization formula
+  const monthlyPayment =
+    (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, period)) /
+    (Math.pow(1 + monthlyRate, period) - 1);
+
+  let balance = principalWithFee;
+  let totalPrincipalPaid = 0;
+  let totalInterestPaid = 0;
+
+  // Only process payments up to the minimum of months elapsed or total period
+  const paymentsToProcess = Math.min(monthsElapsed, period);
+
+  // Walk through each month's payment
+  for (let m = 0; m < paymentsToProcess; m++) {
+    const interestThisMonth = balance * monthlyRate;
+    const principalThisMonth = monthlyPayment - interestThisMonth;
+
+    totalInterestPaid += interestThisMonth;
+    totalPrincipalPaid += principalThisMonth;
+    balance -= principalThisMonth;
+  }
+
+  return {
+    monthlyPayment,
+    principalPaid: Math.max(0, totalPrincipalPaid),
+    interestPaid: Math.max(0, totalInterestPaid),
+    remainingBalance: Math.max(0, balance),
+    paymentsProcessed: paymentsToProcess
+  };
+}
+
+// POST /api/admin/loans/bulk-create - WITH AUTO-CALCULATION FIX
 router.post("/loans/bulk-create", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") {
     return res.status(403).json({ message: "Forbidden" });
@@ -961,15 +997,19 @@ router.post("/loans/bulk-create", auth, async (req, res) => {
   const { loans } = req.body;
 
   if (!loans || !Array.isArray(loans) || loans.length === 0) {
-    return res.status(400).json({ message: "Please provide an array of loans to import" });
+    return res.status(400).json({
+      message: "Please provide an array of loans to import"
+    });
   }
 
   const successful = [];
   const failed = [];
+  const today = new Date();
 
-  // ── Each loan gets its OWN transaction so one failure never kills the rest ──
+  // Process each loan
   for (const loanData of loans) {
     const client = await pool.connect();
+
     try {
       await client.query("BEGIN");
 
@@ -980,26 +1020,37 @@ router.post("/loans/bulk-create", auth, async (req, res) => {
         repayment_period = 12,
         loan_purpose = "Historical loan",
         loan_date,
-        principal_paid,
-        interest_paid,
+        // Optional manual overrides (if you have exact figures from old records)
+        principal_paid: principalPaidOverride,
+        interest_paid: interestPaidOverride,
         last_payment_date,
-        notes,
+        notes
       } = loanData;
 
+      // ── Validate required fields ────────────────────────────────────────
       if (!sacco_number || !loan_amount) {
+        failed.push({
+          sacco_number: sacco_number || "N/A",
+          loan_amount,
+          reason: "Missing SACCO number or loan amount"
+        });
         await client.query("ROLLBACK");
-        failed.push({ sacco_number: sacco_number || "N/A", loan_amount, reason: "Missing SACCO number or loan amount" });
         continue;
       }
 
+      // ── Find member ─────────────────────────────────────────────────────
       const memberRes = await client.query(
         "SELECT id, full_name, loan_limit FROM users WHERE sacco_number = $1",
         [sacco_number]
       );
 
       if (memberRes.rows.length === 0) {
+        failed.push({ 
+          sacco_number, 
+          loan_amount, 
+          reason: "Member not found with this SACCO number" 
+        });
         await client.query("ROLLBACK");
-        failed.push({ sacco_number, loan_amount, reason: "Member not found with this SACCO number" });
         continue;
       }
 
@@ -1007,95 +1058,173 @@ router.post("/loans/bulk-create", auth, async (req, res) => {
       const amount = parseFloat(loan_amount);
 
       if (amount <= 0) {
+        failed.push({ 
+          sacco_number, 
+          loan_amount, 
+          reason: "Loan amount must be greater than 0" 
+        });
         await client.query("ROLLBACK");
-        failed.push({ sacco_number, loan_amount, reason: "Loan amount must be greater than 0" });
         continue;
       }
 
-      const processingFee    = amount * 0.005;
+      // ── Core loan calculations ──────────────────────────────────────────
+      const processingFee = amount * 0.005; // 0.5%
       const principalWithFee = amount + processingFee;
-      const monthlyRate      = parseFloat(interest_rate) / 100;
-      const period           = parseInt(repayment_period);
+      const monthlyRate = parseFloat(interest_rate) / 100;
+      const period = parseInt(repayment_period);
 
-      const monthlyPayment =
-        (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, period)) /
-        (Math.pow(1 + monthlyRate, period) - 1);
-      const totalPayable  = monthlyPayment * period;
+      // ── Determine loan start date and months elapsed ────────────────────
+      const loanStart = loan_date ? new Date(loan_date) : new Date();
+
+      // Calculate full calendar months between loan start and today
+      const monthsElapsed =
+        (today.getFullYear() - loanStart.getFullYear()) * 12 +
+        (today.getMonth() - loanStart.getMonth());
+
+      console.log(`📅 Loan for ${sacco_number}: Start=${loanStart.toISOString().split('T')[0]}, Today=${today.toISOString().split('T')[0]}, Months Elapsed=${monthsElapsed}`);
+
+      // ── Calculate payments: manual override OR auto-calculate ───────────
+      let principalPaid, interestPaid, currentBalance, monthlyPayment, paymentsProcessed;
+
+      const hasManualOverride =
+        principalPaidOverride !== undefined && principalPaidOverride !== "" &&
+        interestPaidOverride !== undefined && interestPaidOverride !== "";
+
+      if (hasManualOverride) {
+        // ✅ Manual override: Admin provided exact figures
+        principalPaid = parseFloat(principalPaidOverride);
+        interestPaid = parseFloat(interestPaidOverride);
+        currentBalance = Math.max(0, principalWithFee - principalPaid);
+        monthlyPayment =
+          (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, period)) /
+          (Math.pow(1 + monthlyRate, period) - 1);
+        paymentsProcessed = "manual";
+
+        if (principalPaid > principalWithFee) {
+          failed.push({
+            sacco_number,
+            loan_amount,
+            reason: `principal_paid (${principalPaid}) exceeds principal+fee (${principalWithFee.toFixed(2)})`
+          });
+          await client.query("ROLLBACK");
+          continue;
+        }
+
+        console.log(`   ✅ Using MANUAL override: Principal=${principalPaid}, Interest=${interestPaid}`);
+      } else if (monthsElapsed <= 0) {
+        // ✅ Loan just started or future date – no payments yet
+        monthlyPayment =
+          (principalWithFee * monthlyRate * Math.pow(1 + monthlyRate, period)) /
+          (Math.pow(1 + monthlyRate, period) - 1);
+        principalPaid = 0;
+        interestPaid = 0;
+        currentBalance = principalWithFee;
+        paymentsProcessed = 0;
+
+        console.log(`   ⏰ New loan (0 months elapsed): No payments yet`);
+      } else {
+        // ✅ AUTO-CALCULATE: Use amortization schedule
+        const calc = calcElapsedPayments(principalWithFee, monthlyRate, period, monthsElapsed);
+        monthlyPayment = calc.monthlyPayment;
+        principalPaid = calc.principalPaid;
+        interestPaid = calc.interestPaid;
+        currentBalance = calc.remainingBalance;
+        paymentsProcessed = calc.paymentsProcessed;
+
+        console.log(`   🧮 AUTO-CALCULATED: ${paymentsProcessed} payments made`);
+        console.log(`      Principal Paid: ${principalPaid.toFixed(2)}, Interest Paid: ${interestPaid.toFixed(2)}`);
+        console.log(`      Current Balance: ${currentBalance.toFixed(2)}`);
+      }
+
+      const totalPayable = monthlyPayment * period;
       const totalInterest = totalPayable - principalWithFee;
 
-      const prevPrincipalPaid = parseFloat(principal_paid || 0);
-      const prevInterestPaid  = parseFloat(interest_paid  || 0);
-      const hasPriorPayments  = prevPrincipalPaid > 0 || prevInterestPaid > 0;
-
-      if (hasPriorPayments && prevPrincipalPaid > principalWithFee) {
-        await client.query("ROLLBACK");
-        failed.push({ sacco_number, loan_amount, reason: `principal_paid exceeds total principal+fee (${principalWithFee.toFixed(2)})` });
-        continue;
-      }
-
-      const currentBalance = Math.max(0, principalWithFee - prevPrincipalPaid);
-
-      // Only insert columns that actually exist on your loans table
-      const loanRes = await client.query(
-        `INSERT INTO loans
-           (user_id, amount, initial_amount, principal_amount,
-            interest_rate, repayment_period, loan_purpose,
-            status, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'APPROVED',$8)
-         RETURNING id`,
-        [
-          member.id,
-          currentBalance,
-          amount,
-          principalWithFee,
-          interest_rate,
-          period,
-          loan_purpose,
-          loan_date || new Date(),
-        ]
-      );
+      // ── Insert the loan record ──────────────────────────────────────────
+      const loanRes = await client.query(`
+        INSERT INTO loans 
+        (user_id, amount, initial_amount, principal_amount,
+         interest_rate, repayment_period, loan_purpose,
+         processing_fee, monthly_payment, total_interest,
+         principal_paid, interest_paid,
+         status, created_at, approved_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
+        RETURNING id
+      `, [
+        member.id,
+        currentBalance,       // amount = current outstanding balance
+        amount,               // initial_amount = original loan amount (without fee)
+        principalWithFee,     // principal_amount = principal + processing fee
+        interest_rate,
+        period,
+        loan_purpose,
+        processingFee,
+        monthlyPayment,
+        totalInterest,
+        principalPaid,
+        interestPaid,
+        'APPROVED',
+        loanStart             // created_at = actual loan date (backdated)
+      ]);
 
       const loanId = loanRes.rows[0].id;
 
-      // Record prior payments if any
-      if (hasPriorPayments) {
-        const paymentDate = last_payment_date || loan_date || new Date();
-        await client.query(
-          `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date)
-           VALUES ($1, $2, $3, $4)`,
-          [loanId, prevPrincipalPaid, prevInterestPaid, paymentDate]
-        );
-        // Also update the loan's paid columns if they exist
-        await client.query(
-          `UPDATE loans SET 
-            principal_paid = COALESCE(principal_paid, 0) + $1,
-            interest_paid  = COALESCE(interest_paid,  0) + $2
-           WHERE id = $3`,
-          [prevPrincipalPaid, prevInterestPaid, loanId]
-        ).catch(() => {}); // ignore if columns don't exist
+      // ── Insert payment record if any payments have been made ────────────
+      if (principalPaid > 0 || interestPaid > 0) {
+        // Determine payment date
+        let paymentDate;
+        if (last_payment_date) {
+          paymentDate = new Date(last_payment_date);
+        } else {
+          // Calculate last payment date based on months elapsed
+          paymentDate = new Date(loanStart);
+          const paidMonths = typeof paymentsProcessed === "number" ? paymentsProcessed : monthsElapsed;
+          paymentDate.setMonth(paymentDate.getMonth() + paidMonths);
+        }
+
+        await client.query(`
+          INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date)
+          VALUES ($1, $2, $3, $4)
+        `, [loanId, principalPaid, interestPaid, paymentDate]);
+
+        console.log(`   💰 Payment record created for ${paymentDate.toISOString().split('T')[0]}`);
+      }
+
+      // ── Optional notes ──────────────────────────────────────────────────
+      if (notes) {
+        try {
+          await client.query(`
+            INSERT INTO loan_notes (loan_id, note, created_by, created_at)
+            VALUES ($1, $2, $3, NOW())
+          `, [loanId, notes, req.user.id]);
+        } catch (_) {
+          // loan_notes table may not exist in all deployments - ignore
+        }
       }
 
       await client.query("COMMIT");
 
       successful.push({
-        loan_id         : loanId,
+        loan_id: loanId,
         sacco_number,
-        member_name     : member.full_name,
-        amount,
+        member_name: member.full_name,
+        original_amount: amount,
         repayment_period: period,
-        current_balance : currentBalance,
-        principal_paid  : prevPrincipalPaid,
-        interest_paid   : prevInterestPaid,
-        status          : "APPROVED",
+        loan_date: loanStart.toISOString().split('T')[0],
+        months_elapsed: typeof paymentsProcessed === "number" ? paymentsProcessed : "manual",
+        principal_paid: parseFloat(principalPaid.toFixed(2)),
+        interest_paid: parseFloat(interestPaid.toFixed(2)),
+        current_balance: parseFloat(currentBalance.toFixed(2)),
+        monthly_payment: parseFloat(monthlyPayment.toFixed(2)),
+        status: 'APPROVED'
       });
 
     } catch (err) {
       await client.query("ROLLBACK");
-      console.error(`Error importing loan for ${loanData.sacco_number}:`, err.message);
+      console.error("❌ Error creating loan:", err);
       failed.push({
         sacco_number: loanData.sacco_number || "N/A",
-        loan_amount : loanData.loan_amount,
-        reason      : err.message || "Database error",
+        loan_amount: loanData.loan_amount,
+        reason: err.message || "Database error"
       });
     } finally {
       client.release();
@@ -1105,7 +1234,7 @@ router.post("/loans/bulk-create", auth, async (req, res) => {
   res.json({
     message: `Imported ${successful.length} loans successfully. ${failed.length} failed.`,
     successful,
-    failed,
+    failed
   });
 });
 
