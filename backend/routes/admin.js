@@ -466,6 +466,110 @@ router.post("/loans/:id/payment", auth, async (req, res) => {
   }
 });
 
+// ✅ POST /admin/loans/:id/repayment
+// Auto-splits a total payment amount into interest + principal (reducing balance)
+// This is what the AdminDashboard Pay button calls.
+router.post("/loans/:id/repayment", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const loanId = req.params.id;
+  const { amount, payment_date, notes } = req.body;
+
+  if (!amount || parseFloat(amount) <= 0) {
+    return res.status(400).json({ message: "A valid payment amount is required" });
+  }
+
+  const totalPayment = parseFloat(amount);
+  const paymentDate = payment_date || new Date().toISOString().split("T")[0];
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Fetch loan
+    const loanRes = await client.query(
+      `SELECT id, amount, principal_amount, interest_rate, repayment_period,
+              principal_paid, interest_paid, monthly_payment, status, user_id
+       FROM loans WHERE id = $1 FOR UPDATE`,
+      [loanId]
+    );
+
+    if (loanRes.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Loan not found" });
+    }
+
+    const loan = loanRes.rows[0];
+
+    if (loan.status !== "APPROVED") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Can only record payments for APPROVED loans" });
+    }
+
+    const currentBalance = parseFloat(loan.amount || 0);
+
+    if (currentBalance <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "This loan is already fully paid" });
+    }
+
+    if (totalPayment > currentBalance + 0.01) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: `Payment KES ${totalPayment.toLocaleString()} exceeds balance KES ${currentBalance.toLocaleString()}`
+      });
+    }
+
+    // ── Auto-split: interest first, then principal (reducing balance method) ──
+    const monthlyRate = parseFloat(loan.interest_rate || 0) / 100;
+    const interestDue = currentBalance * monthlyRate;
+    const interestPmt = Math.min(interestDue, totalPayment);
+    const principalPmt = Math.max(0, totalPayment - interestPmt);
+
+    const newBalance = Math.max(0, currentBalance - principalPmt);
+
+    // Update loan
+    await client.query(
+      `UPDATE loans
+       SET amount         = $1,
+           principal_paid = COALESCE(principal_paid, 0) + $2,
+           interest_paid  = COALESCE(interest_paid,  0) + $3
+       WHERE id = $4`,
+      [newBalance, principalPmt, interestPmt, loanId]
+    );
+
+    // Insert payment record
+    await client.query(
+      `INSERT INTO loan_payments (loan_id, principal_paid, interest_paid, payment_date)
+       VALUES ($1, $2, $3, $4)`,
+      [loanId, principalPmt, interestPmt, paymentDate]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({
+      success: true,
+      message: "Payment recorded successfully",
+      payment: {
+        totalPayment,
+        principalPaid: parseFloat(principalPmt.toFixed(2)),
+        interestPaid: parseFloat(interestPmt.toFixed(2)),
+        newBalance: parseFloat(newBalance.toFixed(2)),
+        paymentDate,
+        loanFullyPaid: newBalance === 0
+      }
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error recording repayment:", err);
+    res.status(500).json({ message: "Server error: " + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Add savings to a member
 router.post("/savings", auth, async (req, res) => {
   if (req.user.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });

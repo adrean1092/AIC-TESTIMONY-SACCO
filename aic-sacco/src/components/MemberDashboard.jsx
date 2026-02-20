@@ -176,73 +176,115 @@ export default function MemberDashboard({ data, onLogout }) {
         {activeLoans.length > 0 && (
           <div className="bg-white rounded-lg shadow p-6 mb-6">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Active Loans</h3>
-            <div className="space-y-4">
+            <div className="space-y-5">
               {activeLoans.map((loan) => {
-                const totalInterest = loan.initialAmount - loan.principalAmount;
-                const remainingInterest = totalInterest - loan.interestPaid;
-                const remainingPrincipal = loan.principalAmount - loan.principalPaid;
-                const progress = ((loan.principalPaid + loan.interestPaid) / loan.initialAmount) * 100;
+                const initialAmount = parseFloat(loan.initialAmount || loan.amount || 0);
+                const currentBalance = parseFloat(loan.amount || 0);
+                const principalAmount = parseFloat(loan.principalAmount || initialAmount);
+                const principalPaid = parseFloat(loan.principalPaid || 0);
+                const interestPaid = parseFloat(loan.interestPaid || 0);
+                const monthlyPayment = parseFloat(loan.monthlyPayment || 0);
+                const processingFee = parseFloat(loan.processingFee || 0);
+                const totalPaid = principalPaid + interestPaid;
+
+                // Progress based on principal repaid vs total principal
+                const progress = principalAmount > 0
+                  ? Math.min((principalPaid / principalAmount) * 100, 100)
+                  : 0;
+
+                // Estimated remaining = current balance (which the backend tracks)
+                const remaining = currentBalance;
 
                 return (
-                  <div key={loan.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
-                    <div className="flex justify-between items-start mb-3">
+                  <div key={loan.id} className="border border-gray-200 rounded-xl p-5 hover:shadow-md transition">
+                    {/* Top Row */}
+                    <div className="flex justify-between items-start mb-4">
                       <div>
-                        <p className="text-lg font-bold text-gray-900">
-                          KES {loan.initialAmount.toLocaleString()}
+                        <p className="text-xl font-bold text-gray-900">
+                          KES {initialAmount.toLocaleString()}
                         </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-xs text-gray-500 mt-0.5">
                           Requested: {new Date(loan.createdAt).toLocaleDateString()}
+                          {loan.repaymentPeriod && ` · ${loan.repaymentPeriod} months`}
+                          {loan.interestRate && ` · ${loan.interestRate}% p.m.`}
                         </p>
                       </div>
-                      <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded">
+                      <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-bold rounded-full">
                         ACTIVE
                       </span>
                     </div>
 
-                    {/* Progress Bar */}
-                    <div className="mb-3">
+                    {/* Repayment Progress Bar */}
+                    <div className="mb-4">
                       <div className="flex justify-between text-xs text-gray-600 mb-1">
-                        <span>Repayment Progress</span>
-                        <span>{progress.toFixed(1)}%</span>
+                        <span className="font-medium">Repayment Progress</span>
+                        <span className="font-bold text-green-700">{progress.toFixed(1)}%</span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div className="w-full bg-gray-200 rounded-full h-3">
                         <div
-                          className="bg-green-600 h-2 rounded-full transition-all"
+                          className="bg-green-500 h-3 rounded-full transition-all"
                           style={{ width: `${progress}%` }}
                         ></div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                      <div className="bg-gray-50 p-2 rounded">
-                        <p className="text-xs text-gray-600">Current Balance</p>
-                        <p className="font-semibold text-red-600">
-                          KES {loan.amount.toLocaleString()}
+                    {/* Payment Stats Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
+                      <div className="bg-red-50 border border-red-100 p-3 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-0.5">Current Balance</p>
+                        <p className="font-bold text-red-600 text-base">
+                          KES {remaining.toLocaleString()}
                         </p>
                       </div>
-                      <div className="bg-blue-50 p-2 rounded">
-                        <p className="text-xs text-gray-600">Principal Paid</p>
-                        <p className="font-semibold text-blue-700">
-                          KES {loan.principalPaid.toLocaleString()}
+                      <div className="bg-green-50 border border-green-100 p-3 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-0.5">Total Paid</p>
+                        <p className="font-bold text-green-700 text-base">
+                          KES {totalPaid.toLocaleString()}
                         </p>
                       </div>
-                      <div className="bg-orange-50 p-2 rounded">
-                        <p className="text-xs text-gray-600">Interest Paid</p>
-                        <p className="font-semibold text-orange-700">
-                          KES {loan.interestPaid.toLocaleString()}
+                      <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-0.5">Principal Paid</p>
+                        <p className="font-bold text-blue-700 text-base">
+                          KES {principalPaid.toLocaleString()}
                         </p>
                       </div>
-                      <div className="bg-purple-50 p-2 rounded">
-                        <p className="text-xs text-gray-600">Remaining</p>
-                        <p className="font-semibold text-purple-700">
-                          KES {(remainingPrincipal + remainingInterest).toLocaleString()}
+                      <div className="bg-orange-50 border border-orange-100 p-3 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-0.5">Interest Paid</p>
+                        <p className="font-bold text-orange-600 text-base">
+                          KES {interestPaid.toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Secondary Info Row */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm mb-4">
+                      {monthlyPayment > 0 && (
+                        <div className="bg-purple-50 border border-purple-100 p-3 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-0.5">Monthly Payment</p>
+                          <p className="font-bold text-purple-700">
+                            KES {monthlyPayment.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                      )}
+                      {processingFee > 0 && (
+                        <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-0.5">Processing Fee</p>
+                          <p className="font-bold text-gray-700">
+                            KES {processingFee.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                      )}
+                      <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-0.5">Principal Amount</p>
+                        <p className="font-bold text-indigo-700">
+                          KES {principalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </p>
                       </div>
                     </div>
 
                     <button
                       onClick={() => handleViewSchedule(loan)}
-                      className="w-full bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 transition font-semibold text-sm"
+                      className="w-full bg-blue-700 text-white px-4 py-2.5 rounded-lg hover:bg-blue-800 transition font-semibold text-sm"
                     >
                       📊 View Payment Schedule
                     </button>
