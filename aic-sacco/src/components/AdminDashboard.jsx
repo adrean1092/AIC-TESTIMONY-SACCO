@@ -103,6 +103,17 @@ const AdminDashboard = () => {
     }
   };
 
+  const runBackfill = async () => {
+    if (!window.confirm("This will recalculate principal_paid and interest_paid for all loans that currently show 0. Continue?")) return;
+    try {
+      const res = await API.post("/loans/backfill-payments");
+      alert(`✅ ${res.data.message}\n\nUpdated: ${res.data.results.updated.length} loans\nSkipped: ${res.data.results.skipped.length} loans`);
+      loadLoans();
+    } catch (error) {
+      alert("❌ Backfill failed: " + (error.response?.data?.message || error.message));
+    }
+  };
+
   const rejectLoan = async (loanId) => {
     if (!window.confirm("Reject this loan?")) return;
     try {
@@ -410,6 +421,12 @@ const AdminDashboard = () => {
                 </p>
               </div>
               <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={runBackfill}
+                  className="bg-orange-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-orange-700 transition whitespace-nowrap"
+                >
+                  🔧 Fix Payment Data
+                </button>
                 <button
                   onClick={() => setShowHistoricalLoanModal(true)}
                   className="bg-slate-700 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-800 transition whitespace-nowrap"
