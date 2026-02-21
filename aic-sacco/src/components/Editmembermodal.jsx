@@ -13,7 +13,7 @@ export default function Editmembermodal({ member, onClose, onSuccess }) {
 
   const [loanData, setLoanData] = useState({
     amount: "",
-    interest_rate: "1.045",
+    interest_rate: "1.8",
     repayment_period: "12",
     loan_purpose: "",
     status: "APPROVED",
@@ -158,7 +158,7 @@ export default function Editmembermodal({ member, onClose, onSuccess }) {
       alert("Loan added successfully!");
       setLoanData({
         amount: "",
-        interest_rate: "1.045",
+        interest_rate: "1.8",
         repayment_period: "12",
         loan_purpose: "",
         status: "APPROVED",
@@ -418,7 +418,7 @@ export default function Editmembermodal({ member, onClose, onSuccess }) {
                       className={inputClass}
                       value={loanData.interest_rate}
                       onChange={e => setLoanData({ ...loanData, interest_rate: e.target.value })}
-                      placeholder="1.045" />
+                      placeholder="1.8" />
                   </div>
 
                   {/* Repayment Period */}

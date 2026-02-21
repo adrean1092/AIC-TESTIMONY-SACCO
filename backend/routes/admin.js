@@ -1120,7 +1120,7 @@ router.post("/loans/bulk-create", auth, async (req, res) => {
       const {
         sacco_number,
         loan_amount,
-        interest_rate = 1.045,
+        interest_rate = 1.8,
         repayment_period = 12,
         loan_purpose = "Historical loan",
         loan_date,

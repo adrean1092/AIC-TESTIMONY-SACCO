@@ -160,7 +160,7 @@ export default function MemberDeclarationForm({ onComplete, memberData }) {
                 />
                 <span className="text-sm text-gray-800">
                   <strong className="font-semibold">Loan Terms & Interest:</strong> I understand that loans are 
-                  calculated using a reducing balance method at the prevailing interest rate (currently 1.045% per month), 
+                  calculated using a reducing balance method at the prevailing interest rate (currently 1.8% per month), 
                   with a 0.5% processing fee. I accept responsibility for timely repayment.
                 </span>
               </label>

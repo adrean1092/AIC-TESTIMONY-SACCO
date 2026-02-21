@@ -7,7 +7,7 @@ export default function EditLoanModal({ loan, onClose, onSuccess }) {
   const [activeTab, setActiveTab] = useState("loan");
   const [formData, setFormData] = useState({
     amount: "",
-    interest_rate: "1.045",
+    interest_rate: "1.8",
     repayment_period: "",
     loan_purpose: "",
     created_at: "",
@@ -25,7 +25,7 @@ export default function EditLoanModal({ loan, onClose, onSuccess }) {
 
       setFormData({
         amount: loan.amount || loan.initialAmount || "",
-        interest_rate: loan.interestRate || "1.045",
+        interest_rate: loan.interestRate || "1.8",
         repayment_period: loan.repaymentPeriod || "",
         loan_purpose: loan.loanPurpose || "",
         created_at: createdDate,
@@ -197,7 +197,7 @@ export default function EditLoanModal({ loan, onClose, onSuccess }) {
                     value={formData.interest_rate}
                     onChange={(e) => setFormData({ ...formData, interest_rate: e.target.value })}
                     className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500"
-                    placeholder="1.045"
+                    placeholder="1.8"
                   />
                   <p className="text-xs text-gray-500 mt-1">Annual: {preview ? preview.annualRate : "0.00"}%</p>
                 </div>

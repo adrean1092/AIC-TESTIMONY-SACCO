@@ -98,7 +98,7 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
         // Build client-side previews
         const computedPreviews = parsed.map((r) => {
           const loanAmount   = parseFloat(r.loan_amount || 0);
-          const interestRate = parseFloat(r.interest_rate || 1.045);
+          const interestRate = parseFloat(r.interest_rate || 1.8);
           const period       = parseInt(r.repayment_period || 12);
           const loanDate     = r.loan_date;
 
@@ -145,7 +145,7 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
       const loans = rows.map((r) => ({
         sacco_number:     r.sacco_number || "",
         loan_amount:      r.loan_amount   ? parseFloat(r.loan_amount)   : undefined,
-        interest_rate:    r.interest_rate ? parseFloat(r.interest_rate) : 1.045,
+        interest_rate:    r.interest_rate ? parseFloat(r.interest_rate) : 1.8,
         repayment_period: r.repayment_period ? parseInt(r.repayment_period) : 12,
         loan_purpose:     r.loan_purpose  || "Historical loan",
         loan_date:        r.loan_date     || new Date().toISOString().split("T")[0],
@@ -169,9 +169,9 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
   const downloadTemplate = () => {
     const csv = [
       "sacco_number,loan_amount,interest_rate,repayment_period,loan_purpose,loan_date,notes",
-      "SACCO-0001,50000,1.045,12,Business loan,2024-01-15,Historical loan from 2024",
-      "SACCO-0002,30000,1.045,6,Emergency loan,2024-06-01,Pre-system loan",
-      "SACCO-0003,75000,1.045,24,Agricultural loan,2023-12-10,Imported from old records",
+      "SACCO-0001,50000,1.8,12,Business loan,2024-01-15,Historical loan from 2024",
+      "SACCO-0002,30000,1.8,6,Emergency loan,2024-06-01,Pre-system loan",
+      "SACCO-0003,75000,1.8,24,Agricultural loan,2023-12-10,Imported from old records",
     ].join("\n");
 
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -283,7 +283,7 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
                         <tr key={i} className="hover:bg-gray-50">
                           <td className="px-3 py-2 font-semibold text-gray-800">{row.sacco_number}</td>
                           <td className="px-3 py-2 text-gray-700">KES {parseFloat(row.loan_amount || 0).toLocaleString()}</td>
-                          <td className="px-3 py-2 text-gray-700">{row.interest_rate || '1.045'}%</td>
+                          <td className="px-3 py-2 text-gray-700">{row.interest_rate || '1.8'}%</td>
                           <td className="px-3 py-2 text-gray-700">{row.repayment_period || '12'} mo</td>
                           <td className="px-3 py-2 text-gray-700">{row.loan_date}</td>
                           <td className="px-3 py-2 font-semibold text-indigo-700">{p.monthsElapsed}</td>

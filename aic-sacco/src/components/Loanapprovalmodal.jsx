@@ -22,7 +22,7 @@ export default function LoanApprovalModal({ loan, onClose, onSuccess }) {
     }
 
     const principal = parseFloat(amount);
-    const interestRate = parseFloat(loan.interestRate || 1.045);
+    const interestRate = parseFloat(loan.interestRate || 1.8);
     const period = parseInt(loan.repaymentPeriod || 12);
     
     const processingFee = principal * 0.005; // 0.5%

@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS loans (
     principal_amount NUMERIC(12,2),
     principal_paid NUMERIC(10,2) DEFAULT 0,
     interest_paid NUMERIC(10,2) DEFAULT 0,
-    interest_rate NUMERIC(5,2) NOT NULL DEFAULT 1.045,
+    interest_rate NUMERIC(5,2) NOT NULL DEFAULT 1.8,
     repayment_period INTEGER NOT NULL,
     loan_purpose TEXT,
     processing_fee NUMERIC(15,2) DEFAULT 0,

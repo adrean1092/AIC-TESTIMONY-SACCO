@@ -257,8 +257,8 @@ router.post("/", auth, async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Calculate interest using reducing balance method (1.045% per month)
-    const monthlyInterestRate = 1.045 / 100; // 1.045% monthly
+    // ✅ FIXED: Calculate interest using reducing balance method (1.8% per month)
+    const monthlyInterestRate = 1.8 / 100; // 1.8% monthly
     const processingFeeRate = 0.5 / 100; // 0.5% processing fee
     
     // Calculate processing fee and add to principal
@@ -295,7 +295,7 @@ router.post("/", auth, async (req, res) => {
           totalPayable, // Total amount to repay
           amount, // Original principal (without processing fee)
           totalPayable, // Initial total
-          (monthlyInterestRate * 12 * 100), // Annual rate for display (1.045 * 12 = 12.54%)
+          (monthlyInterestRate * 12 * 100), // Annual rate for display (1.8 * 12 = 21.6%)
           repaymentPeriod, 
           loanPurpose
         ]

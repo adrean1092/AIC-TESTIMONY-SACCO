@@ -42,7 +42,7 @@ export default function AddHistoricalLoanModal({ onClose, onSuccess }) {
   // ── loan fields ──────────────────────────────────────────────────────────────
   const [loan, setLoan] = useState({
     original_amount : "",
-    interest_rate   : "1.045",
+    interest_rate   : "1.8",
     repayment_period: "12",
     loan_purpose    : "Historical loan",
     loan_date       : "",          // backdate
@@ -519,7 +519,7 @@ export default function AddHistoricalLoanModal({ onClose, onSuccess }) {
               )}
               <div className="flex gap-3 justify-center pt-2">
                 <button
-                  onClick={() => { setStep(0); setMember(null); setLoan({ original_amount:"",interest_rate:"1.045",repayment_period:"12",loan_purpose:"Historical loan",loan_date:"",notes:"" }); setPartial({ has_payments:false,principal_paid:"",interest_paid:"",last_payment_date:"" }); setResult(null); setSearch(""); }}
+                  onClick={() => { setStep(0); setMember(null); setLoan({ original_amount:"",interest_rate:"1.8",repayment_period:"12",loan_purpose:"Historical loan",loan_date:"",notes:"" }); setPartial({ has_payments:false,principal_paid:"",interest_paid:"",last_payment_date:"" }); setResult(null); setSearch(""); }}
                   className="px-5 py-2.5 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition"
                 >
                   Add Another

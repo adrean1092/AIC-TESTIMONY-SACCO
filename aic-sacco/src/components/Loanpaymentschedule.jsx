@@ -5,7 +5,7 @@ import React, { useMemo } from "react";
  * Displays a complete month-by-month breakdown of loan payments with exact dates
  */
 export default function LoanPaymentSchedule({ principal, repaymentPeriod, loanStartDate, onClose }) {
-  // Interest rate: 1.045% monthly (12.54% annual)
+  // Interest rate: 1.8% monthly (21.6% annual)
   const MONTHLY_RATE = 0.01045;
   const PROCESSING_FEE_RATE = 0.005; // 0.5%
   

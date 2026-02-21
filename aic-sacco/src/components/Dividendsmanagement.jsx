@@ -66,7 +66,7 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
       const loans = rows.map((r) => ({
         sacco_number     : r.sacco_number || "",
         loan_amount      : r.loan_amount      ? parseFloat(r.loan_amount)      : undefined,
-        interest_rate    : r.interest_rate    ? parseFloat(r.interest_rate)    : 1.045,
+        interest_rate    : r.interest_rate    ? parseFloat(r.interest_rate)    : 1.8,
         repayment_period : r.repayment_period ? parseInt(r.repayment_period)   : 12,
         loan_purpose     : r.loan_purpose     || "Historical loan",
         loan_date        : r.loan_date        || new Date().toISOString().split("T")[0],
@@ -90,9 +90,9 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
   const downloadTemplate = () => {
     const csv = [
       "sacco_number,loan_amount,interest_rate,repayment_period,loan_purpose,loan_date,principal_paid,interest_paid,last_payment_date,notes",
-      "SACCO-0001,50000,1.045,12,Business loan,2022-03-15,,,, No payments yet",
-      "SACCO-0002,75000,1.045,24,School fees,2021-11-01,30000,8500,2023-06-30,Partial repayment recorded",
-      "SACCO-0003,30000,1.045,6,Emergency,2023-01-20,,,,",
+      "SACCO-0001,50000,1.8,12,Business loan,2022-03-15,,,, No payments yet",
+      "SACCO-0002,75000,1.8,24,School fees,2021-11-01,30000,8500,2023-06-30,Partial repayment recorded",
+      "SACCO-0003,30000,1.8,6,Emergency,2023-01-20,,,,",
     ].join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
@@ -134,7 +134,7 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
                 <div className="space-y-1 text-xs">
                   <p><strong>sacco_number:</strong> Member's SACCO number (e.g., SACCO-0001)</p>
                   <p><strong>loan_amount:</strong> Principal loan amount (e.g., 50000)</p>
-                  <p><strong>interest_rate:</strong> Monthly rate (default: 1.045)</p>
+                  <p><strong>interest_rate:</strong> Monthly rate (default: 1.8)</p>
                   <p><strong>repayment_period:</strong> Months (default: 12)</p>
                   <p><strong>loan_purpose:</strong> Why the loan was taken (default: "Historical loan")</p>
                   <p><strong>loan_date:</strong> When loan was issued (YYYY-MM-DD) — required for backdating</p>
@@ -215,7 +215,7 @@ const BulkLoanUpload = ({ onClose, onSuccess }) => {
                           <td className="px-3 py-2 text-gray-700 font-medium">{row.sacco_number}</td>
                           <td className="px-3 py-2 text-gray-700 font-semibold">KES {parseFloat(row.loan_amount || 0).toLocaleString()}</td>
                           <td className="px-3 py-2 text-amber-700 font-medium">{row.loan_date || "—"}</td>
-                          <td className="px-3 py-2 text-gray-700">{row.interest_rate || "1.045"}%</td>
+                          <td className="px-3 py-2 text-gray-700">{row.interest_rate || "1.8"}%</td>
                           <td className="px-3 py-2 text-gray-700">{row.repayment_period || "12"} mo</td>
                           <td className="px-3 py-2 text-gray-500 max-w-xs truncate">{row.loan_purpose || "Historical loan"}</td>
                           <td className={`px-3 py-2 font-medium ${hasPmt && row.principal_paid ? "text-emerald-700" : "text-gray-300"}`}>
