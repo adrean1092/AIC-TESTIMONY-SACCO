@@ -7,7 +7,7 @@ const transporter = nodemailer.createTransport({
   secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD, // ⭐ FIXED: was EMAIL_PASS, now EMAIL_PASSWORD
+    pass: process.env.EMAIL_PASSWORD,
   },
 });
 
@@ -35,8 +35,8 @@ ID Number: ${memberIdNumber}
 
 To approve this loan application, please contact our Finance Director:
 
-Finance Director: Emmy
-Phone: 0727228097
+Finance Director: Emmy Kenik
+Phone: 0729988681
 
 Thank you for your support.
 
@@ -69,8 +69,8 @@ AIC TESTIMONY PASTORS SACCO
           <div style="background-color: #fef2f2; border-left: 4px solid #b91c1c; padding: 15px; margin: 20px 0;">
             <h4 style="color: #b91c1c; margin-top: 0;">Action Required</h4>
             <p>To approve this loan application, please contact our Finance Director:</p>
-            <p style="margin: 5px 0;"><strong>Finance Director:</strong> Emmy</p>
-            <p style="margin: 5px 0;"><strong>Phone:</strong> <a href="tel:0727228097" style="color: #b91c1c;">0727228097</a></p>
+            <p style="margin: 5px 0;"><strong>Finance Director:</strong> Emmy Kenik</p>
+            <p style="margin: 5px 0;"><strong>Phone:</strong> <a href="tel:0729988681" style="color: #b91c1c;">0729988681</a></p>
           </div>
           
           <p>Thank you for your support.</p>

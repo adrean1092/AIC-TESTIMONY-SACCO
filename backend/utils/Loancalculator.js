@@ -1,6 +1,6 @@
 /**
  * AIC Testimony SACCO Loan Calculator
- * Implements reducing balance method with monthly rate of 1.045%
+ * Implements reducing balance method with monthly rate of 1.8%
  * Processing fee of 0.5% added to principal
  */
 
@@ -12,9 +12,9 @@
  */
 function calculateLoan(principal, months) {
   // Constants
-  const MONTHLY_INTEREST_RATE = 1.045 / 100; // 1.045% per month
+  const MONTHLY_INTEREST_RATE = 1.8 / 100; // 1.8% per month
   const PROCESSING_FEE_RATE = 0.5 / 100; // 0.5% processing fee
-  const ANNUAL_INTEREST_RATE = MONTHLY_INTEREST_RATE * 12 * 100; // 12.54% annual
+  const ANNUAL_INTEREST_RATE = MONTHLY_INTEREST_RATE * 12 * 100; // 21.6% annual
   
   // Step 1: Calculate processing fee and add to principal
   const processingFee = principal * PROCESSING_FEE_RATE;
@@ -75,8 +75,8 @@ function calculateLoan(principal, months) {
     principalWithFee: parseFloat(principalWithFee.toFixed(2)),
     
     // Interest rates
-    monthlyInterestRate: (MONTHLY_INTEREST_RATE * 100).toFixed(3) + '%',
-    annualInterestRate: ANNUAL_INTEREST_RATE.toFixed(2) + '%',
+    monthlyInterestRate: (MONTHLY_INTEREST_RATE * 100).toFixed(1) + '%',
+    annualInterestRate: ANNUAL_INTEREST_RATE.toFixed(1) + '%',
     
     // Payment details
     monthlyPayment: parseFloat(monthlyPayment.toFixed(2)),
@@ -183,6 +183,7 @@ function validateLoanRequest(amount, months, availableLimit) {
 // Example usage and testing
 if (require.main === module) {
   console.log("AIC Testimony SACCO Loan Calculator");
+  console.log("Interest Rate: 1.8% monthly (21.6% annual)");
   console.log("===================================\n");
   
   // Example 1: KES 100,000 for 12 months
