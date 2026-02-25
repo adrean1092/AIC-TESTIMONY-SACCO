@@ -278,6 +278,74 @@ router.delete("/members/:id", auth, async (req, res) => {
   }
 });
 
+// ======== SAVINGS MANAGEMENT ========
+
+// ✅ NEW: Admin add savings for any member
+router.post("/savings/add", auth, async (req, res) => {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const { user_id, amount, saved_at, source } = req.body;
+
+  // Validate inputs
+  if (!user_id) {
+    return res.status(400).json({ message: "user_id is required" });
+  }
+
+  if (!amount || parseFloat(amount) <= 0) {
+    return res.status(400).json({ message: "Please enter a valid amount greater than 0" });
+  }
+
+  const savingsAmount = parseFloat(amount);
+  const savingsDate = saved_at || new Date().toISOString();
+
+  try {
+    // Verify user exists
+    const userRes = await pool.query(
+      "SELECT id, full_name, sacco_number FROM users WHERE id=$1",
+      [user_id]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const user = userRes.rows[0];
+
+    // Insert savings record
+    await pool.query(
+      `INSERT INTO savings (user_id, amount, saved_at, source)
+       VALUES ($1, $2, $3, $4)`,
+      [user_id, savingsAmount, savingsDate, source || 'Admin Deposit']
+    );
+
+    // Get updated total savings for this user
+    const savingsRes = await pool.query(
+      "SELECT SUM(amount) AS total FROM savings WHERE user_id=$1",
+      [user_id]
+    );
+
+    const totalSavings = parseFloat(savingsRes.rows[0].total) || 0;
+
+    res.json({
+      success: true,
+      message: `Savings added successfully for ${user.full_name}`,
+      user: {
+        id: user.id,
+        name: user.full_name,
+        saccoNumber: user.sacco_number
+      },
+      amount: savingsAmount,
+      totalSavings: totalSavings,
+      newLoanLimit: totalSavings * 3
+    });
+  } catch (err) {
+    console.error("Error adding savings:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ======== LOANS MANAGEMENT ========
 
 // ✅ UPDATED: Edit loan with backdating support
