@@ -81,6 +81,52 @@ router.get("/me", auth, async (req, res) => {
   }
 });
 
+// ✅ NEW: Add savings endpoint
+router.post("/add-savings", auth, async (req, res) => {
+  if (req.user.role !== "MEMBER") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const { amount, source } = req.body;
+
+  // Validate amount
+  if (!amount || parseFloat(amount) <= 0) {
+    return res.status(400).json({ 
+      message: "Please enter a valid amount greater than 0" 
+    });
+  }
+
+  const savingsAmount = parseFloat(amount);
+
+  try {
+    // Insert savings record
+    await pool.query(
+      `INSERT INTO savings (user_id, amount, saved_at, source)
+       VALUES ($1, $2, NOW(), $3)`,
+      [req.user.id, savingsAmount, source || 'Member Deposit']
+    );
+
+    // Get updated total savings
+    const savingsRes = await pool.query(
+      "SELECT SUM(amount) AS total FROM savings WHERE user_id=$1",
+      [req.user.id]
+    );
+
+    const totalSavings = parseFloat(savingsRes.rows[0].total) || 0;
+
+    res.json({
+      success: true,
+      message: "Savings added successfully",
+      amount: savingsAmount,
+      totalSavings: totalSavings,
+      newLoanLimit: totalSavings * 3
+    });
+  } catch (err) {
+    console.error("Error adding savings:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Submit member declaration
 router.post("/submit-declaration", auth, async (req, res) => {
   if (req.user.role !== "MEMBER") {

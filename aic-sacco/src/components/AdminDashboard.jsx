@@ -44,6 +44,9 @@ const AdminDashboard = () => {
   // Member search
   const [memberSearch, setMemberSearch] = useState("");
 
+  // Savings search
+  const [savingsSearch, setSavingsSearch] = useState("");
+
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
@@ -94,12 +97,15 @@ const AdminDashboard = () => {
       return;
     }
     try {
-      await API.post(`/admin/members/${memberId}/savings`, { amount: parseFloat(amount) });
+      await API.post('/admin/savings/add', { 
+        user_id: memberId, 
+        amount: parseFloat(amount) 
+      });
       setSavingsAmount({ ...savingsAmount, [memberId]: "" });
       loadMembers();
-      alert("Savings updated successfully!");
+      alert("Savings added successfully!");
     } catch (error) {
-      alert("Failed to update savings: " + (error.response?.data?.message || error.message));
+      alert("Failed to add savings: " + (error.response?.data?.message || error.message));
     }
   };
 
@@ -366,6 +372,17 @@ const AdminDashboard = () => {
               </div>
             </div>
 
+            {/* Search Box */}
+            <div className="bg-white rounded-xl shadow p-4">
+              <input
+                type="text"
+                placeholder="🔍 Search by SACCO number, name, or email..."
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+                value={savingsSearch}
+                onChange={(e) => setSavingsSearch(e.target.value)}
+              />
+            </div>
+
             {/* Savings Table */}
             <div className="bg-white rounded-xl shadow overflow-hidden">
               <div className="px-6 py-4 border-b bg-green-50">
@@ -383,7 +400,16 @@ const AdminDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
-                    {members.filter(m => m.role === 'MEMBER').map((m, idx) => (
+                    {members
+                      .filter(m => m.role === 'MEMBER')
+                      .filter(m => {
+                        const searchLower = savingsSearch.toLowerCase();
+                        return !savingsSearch || 
+                          (m.sacco_number && m.sacco_number.toLowerCase().includes(searchLower)) ||
+                          (m.full_name && m.full_name.toLowerCase().includes(searchLower)) ||
+                          (m.email && m.email.toLowerCase().includes(searchLower));
+                      })
+                      .map((m, idx) => (
                       <tr key={m.id || idx} className="hover:bg-green-50 transition">
                         <td className="px-4 py-3 text-sm font-bold text-red-700">{m.sacco_number || '—'}</td>
                         <td className="px-4 py-3">
